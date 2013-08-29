@@ -1,0 +1,137 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+	<title>Register</title>
+    <meta charset="utf-8" />
+    <meta name="format-detection" content="telephone=no" />
+    <meta name="viewport" content="user-scalable=no, initial-scale=1, maximum-scale=1, minimum-scale=1, width=device-width, height=device-height, target-densitydpi=device-dpi" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Login and Registration Form with HTML5 and CSS3" />
+    <meta name="keywords" content="html5, css3, form, switch, animation, :target, pseudo-class" />
+    <meta name="author" content="Codrops" />
+    <link rel="shortcut icon" href="../favicon.ico">
+    <link rel="stylesheet" type="text/css" href="css/demo.css" />
+    <link rel="stylesheet" type="text/css" href="css/style.css" />
+    <link rel="stylesheet" type="text/css" href="css/animate-custom.css" />
+    <link rel="stylesheet" type="text/css" href="css/index.css" />
+    <script type="text/javascript" src="cordova.js"></script>
+    <script type="text/javascript" src="js/index.js"></script>
+    <script type="text/javascript" src="js/webSocket.min.js"></script>
+    <script type="text/javascript">
+        var wsUriTest = "ws://echo.websocket.org"
+        var wsuri = "ws://xsuii.meibu.net:8001/login"
+        var origin = "http://xsuii.meibu.net"
+        var output;
+
+        function init() {
+            output = document.getElementById("output");
+            testWebSocket();
+        }
+
+        function testWebSocket() {
+            //websocket = new plugins.WebSocket(wsUriTest);
+            websocket = new plugins.WebSocket(wsuri, "", origin);
+            websocket.onopen = function(evt) { onOpen(evt) };
+            websocket.onclose = function(evt) { onClose(evt) };
+            websocket.onmessage = function(evt) { onMessage(evt) };
+            websocket.onerror = function(evt) { onError(evt) };
+        }
+
+        function onOpen(evt) {
+                writeToScreen("CONNECTED");
+        }
+
+        function onClose(evt) {
+                writeToScreen("DISCONNECTED");
+        }
+
+        function onMessage(evt) {
+                writeToScreen('<span style="color: blue;">RESPONSE: ' + evt + '</span>');
+                var isIn = parseInt(evt);
+                if(isIn) {
+                    window.location.assign("chat.html");
+					localStorage.uid = isIn;	// store uid for keep connection binding while page switch
+                }else{
+                    loginError("user name or userpassword error!");
+                }
+        }
+
+        function onError(evt) {
+                writeToScreen('<span style="color: red;">ERROR: ' + evt + '</span>');
+        }
+
+        function doSend(message) {
+                writeToScreen("SENT: " + message);
+                websocket.send(message);
+        }
+
+        function sendLogin() {
+            var user = document.getElementById("username").value;
+            var passwd = document.getElementById("password").value;
+            doSend(user + "+" +passwd);
+        }
+		
+		function loginError(err) {
+			var para = document.getElementById("loginError");
+			para.innerHTML = err;
+		}
+
+        function writeToScreen(message) {
+                var pre = document.createElement("p");
+                pre.style.wordWrap = "break-word";
+                pre.innerHTML = message;
+                output.appendChild(pre);
+        }
+
+        window.addEventListener("load", init, false);
+    </script>
+</head>
+
+<body>
+<div class="container"> 
+    <!-- Codrops top bar -->
+    <div class="codrops-top">  <strong> Master : </strong>Enjoy yourself
+        <div class="clr"></div>
+    </div>
+    <!--/ Codrops top bar -->
+    <header>
+        <h1>Welcome</h1>
+    </header>
+    <section>
+        <div id="container_demo" > 
+            <!-- hidden anchor to stop jump http://www... --> 
+            <a class="hiddenanchor" id="toregister"></a> 
+            <a class="hiddenanchor" id="tologin"></a>
+            <div id="wrapper">
+                <div id="register" class="animate form">
+                    <form  action="mysuperscript.php" autocomplete="on">
+                        <h1> Sign up </h1>
+                        <p>
+                            <label for="usernamesignup" class="uname" data-icon="u">Your username</label>
+                            <input id="usernamesignup" name="usernamesignup" required type="text" placeholder="mysuperusername690" />
+                        </p>
+                        <p>
+                            <label for="emailsignup" class="youmail" data-icon="e" > Your email</label>
+                            <input id="emailsignup" name="emailsignup" required type="email" placeholder="mysupermail@mail.com"/>
+                        </p>
+                        <p>
+                            <label for="passwordsignup" class="youpasswd" data-icon="p">Your password </label>
+                            <input id="passwordsignup" name="passwordsignup" required type="password" placeholder="eg. X8df!90EO"/>
+                        </p>
+                        <p>
+                            <label for="passwordsignup_confirm" class="youpasswd" data-icon="p">Please confirm your password </label>
+                            <input id="passwordsignup_confirm" name="passwordsignup_confirm" required type="password" placeholder="eg. X8df!90EO"/>
+                        </p>
+                        <p class="signin button">
+                            <input type="submit" value="Sign up"/>
+                        </p>
+                        <p class="change_link"> Already a member ? <a href="index.html"> Go and log in </a> </p>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </section>
+    <div id="output"></div>
+</div>
+</body>
+</html>
