@@ -9,6 +9,7 @@ import (
 	"code.google.com/p/go.net/websocket"
 	"database/sql"
 	_ "github.com/Go-SQL-Driver/MySQL"
+	"github.com/xsuii/dontsettle/chat"
 	"log"
 	"strconv"
 	"strings"
@@ -63,6 +64,9 @@ func Login(ws *websocket.Conn) {
 			log.Println(uid, "login success . . .")
 			t := strconv.Itoa(uid)
 			websocket.Message.Send(ws, t+"+"+username)
+
+			server := chat.NewServer("/chat")
+			go server.Listen()
 			return
 		} else {
 			websocket.Message.Send(ws, "0")

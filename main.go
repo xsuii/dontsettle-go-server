@@ -8,7 +8,6 @@ package main
 import (
 	"code.google.com/p/go.net/websocket"
 	"flag"
-	"github.com/xsuii/dontsettle/chat"
 	"github.com/xsuii/dontsettle/identify"
 	"log"
 	"net/http"
@@ -18,8 +17,6 @@ var addr = flag.String("addr", ":8001", "http service address") // default liste
 
 func main() {
 	flag.Parse()
-	server := chat.NewServer("/chat")
-	go server.Listen()
 
 	log.SetFlags(log.Lshortfile) // log begin with file and line number
 
