@@ -53,6 +53,7 @@ func (c *connection) Done() {
 }
 
 func (c *connection) Listen() {
+	log.Println("client listening")
 	go c.listenWrite()
 	c.listenRead()
 }
@@ -77,12 +78,12 @@ func (c *connection) listenRead() { // send to all
 			} else if err != nil {
 				c.server.Err(err)
 			} else {
-				temp := strings.Split(msg, "+")
+				temp := strings.Split(msg, "+") // later : use JSON identify with head&body
 				switch temp[0] {
-				case "S":
+				case "S": // one-to-one chat. // this will get "S + send to + massage body".
 					db, err := sql.Open("mysql", "root:mrp520@/game")
 					checkError(err)
-					log.Println("biunique.database.open")
+					log.Println("open database")
 
 					stmt, err := db.Prepare("SELECT uid FROM user WHERE username=?")
 					checkError(err)
@@ -97,32 +98,38 @@ func (c *connection) listenRead() { // send to all
 					log.Println(uid)
 
 					db.Close()
-					log.Println("biunique.database.close")
+					log.Println("database close")
 
-					t := strconv.Itoa(uid)
+					var dId []string
+					dId = append(dId, strconv.Itoa(uid))
+					sId := c.uid
 					m := "[S]:" + c.author + ": " + temp[2]
-					s := &single{toid: t, msg: m}
-					c.server.biunique <- s
-				case "G":
+					s := &pack{dUid: dId, sUid: sId, msg: m, t: "S"}
+
+					log.Println(s)
+					c.server.transfer <- s
+				case "G": // one-to-many chat.  // this will get "G + send to + massage body".
 					db, err := sql.Open("mysql", "root:mrp520@/game")
 					checkError(err)
-					log.Println("togroup.database.open")
+					log.Println("database open")
 
 					stmt, err := db.Prepare("SELECT uid FROM ingroup WHERE gid in(SELECT gid FROM game.group WHERE groupname=?)")
 
 					rows, err := stmt.Query(temp[1])
 
 					m := "[G:" + temp[1] + "]" + c.author + ": " + temp[2]
-					g := &group{members: []string{}, msg: m}
+					var mem []string
 					for rows.Next() {
 						var uid string
 						err = rows.Scan(&uid)
 						checkError(err)
-						g.members = append(g.members, uid)
+						mem = append(mem, uid)
 						log.Println(uid)
 					}
+					g := &pack{sUid: c.uid, dUid: mem, msg: m, t: "G"}
+
 					log.Println(g)
-					c.server.togroup <- g
+					c.server.transfer <- g
 				case "B":
 					c.server.BroadCast("[B]:" + c.author + ": " + temp[1])
 				}
