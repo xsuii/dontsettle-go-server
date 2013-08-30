@@ -307,18 +307,6 @@ p.change_link{
 		 border-radius: 5px;
 }
 
-.container #output {
-	position: absolute;
-	border: 3px solid #666;
-	width: 400px;
-	height: 100px;
-	bottom: 5px;
-	margin: 0 auto;
-	text-align: left;
-	background-color: #CCC;
-	overflow: scroll;
-}
-
 /** the actual animation, credit where due : http://daneden.me/animate/ ***/
 .animate{
 	-webkit-animation-duration: 0.5s;
