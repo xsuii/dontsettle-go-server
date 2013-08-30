@@ -9,7 +9,6 @@ import (
 	"code.google.com/p/go.net/websocket"
 	"database/sql"
 	_ "github.com/Go-SQL-Driver/MySQL"
-	"github.com/xsuii/dontsettle/chat"
 	"log"
 	"strconv"
 	"strings"
@@ -18,10 +17,16 @@ import (
 // login message
 var ()
 
+type LoginInfo struct {
+	Username   string
+	Userpasswd string
+}
+
 func Login(ws *websocket.Conn) {
 	log.Println(" # USER LOGIN # ")
 	log.Println("client :", ws.Request().RemoteAddr)
-	var reply string
+	//var a string
+	var login LoginInfo
 	var effect int
 	var uid int
 	var username string
@@ -37,17 +42,14 @@ func Login(ws *websocket.Conn) {
 
 	for { // keep until login success
 		// get login imformation from client
-		err = websocket.Message.Receive(ws, &reply)
+		err = websocket.JSON.Receive(ws, &login)
 		checkErr(err)
-
-		temp := strings.Split(reply, "+")
-
-		log.Println("Receive login message : [ Username:", temp[0], " ]  [ Password:", temp[1], " ]")
+		log.Println("Receive login message : [ Username:", login.Username, " ]  [ Password:", login.Userpasswd, " ]")
 
 		stmt, err := db.Prepare("select UID, username, userpassword from user where username=? && userpassword=?")
 		checkErr(err)
 
-		rows, err := stmt.Query(temp[0], temp[1]) // temp contants username and password which split before
+		rows, err := stmt.Query(login.Username, login.Userpasswd) // temp contants username and password which split before
 		checkErr(err)
 
 		for rows.Next() {
@@ -63,10 +65,8 @@ func Login(ws *websocket.Conn) {
 		if effect > 0 {
 			log.Println(uid, "login success . . .")
 			t := strconv.Itoa(uid)
-			websocket.Message.Send(ws, t+"+"+username)
+			websocket.Message.Send(ws, t)
 
-			server := chat.NewServer("/chat")
-			go server.Listen()
 			return
 		} else {
 			websocket.Message.Send(ws, "0")
@@ -91,7 +91,7 @@ func Register(ws *websocket.Conn) {
 
 	for {
 		// get register imformations
-		err = websocket.Message.Receive(ws, &reply)
+		err = websocket.JSON.Receive(ws, &reply)
 		checkErr(err)
 
 		temp := strings.Split(reply, "+")
@@ -106,9 +106,9 @@ func Register(ws *websocket.Conn) {
 		checkErr(err)
 
 		if err != nil {
-			websocket.Message.Send(ws, "REGISTER_FAIL")
+			websocket.JSON.Send(ws, "REGISTER_FAIL")
 		} else {
-			websocket.Message.Send(ws, "REGISTER_SUCCESS")
+			websocket.JSON.Send(ws, "REGISTER_SUCCESS")
 			return
 		}
 	}
