@@ -75,6 +75,7 @@ func Login(ws *websocket.Conn) {
 	}
 }
 
+// [later:JSON,logic,]
 func Register(ws *websocket.Conn) {
 	log.Println(" # USER REGISTER #")
 	log.Println("client :", ws.Request().RemoteAddr)
