@@ -5,159 +5,8 @@
     <title>chat</title>
     <link rel="stylesheet" type="text/css" href="css/chat.css"/>
     <link rel="stylesheet" type="text/css" href="css/style.css"/>
-    <script type="text/javascript">
-		var wsUriTest = "ws://echo.websocket.org"
-		var wsuri = "ws://xsuii.meibu.net:8001/chat"
-    	var origin = "http://xsuii.meibu.net"
-		
-		var tbName = "history";
-		var dbName = localStorage.uid;
-		var db = window.openDatabase(dbName, "1.0", "history store", 1000);
-		var talks;
-		
-        var output;
-		function init() {
-            output = document.getElementById("output");
-            onWebSocket();
-		}
-
-        function onWebSocket() {
-			//websocket = new plugins.WebSocket(wsUriTest);
-            websocket = new WebSocket(wsuri);
-            websocket.onopen = function(evt) { onOpen(evt) };
-            websocket.onclose = function(evt) { onClose(evt) };
-            websocket.onmessage = function(evt) { onMessage(evt) };
-            websocket.onerror = function(evt) { onError(evt) }; 
-        }
-
-        function onOpen(evt) {
-                myLog("CONNECTED");
-				document.getElementById("author").innerHTML = "Author:"+localStorage.username;
-				document.getElementById("uid").innerHTML = "UID:"+localStorage.uid;
-                doSend(localStorage.uid+"+"+localStorage.username);	// send uid as identify
-        }
-
-        function onClose(evt) {
-                myLog("DISCONNECTED");
-        }
-
-        function onMessage(evt) {
-				talks = evt.data
-                myLog('<span style="color: blue;">RESPONSE: ' + talks + '</span>');
-				
-				var para = document.getElementById("messageBox");
-				var pre = document.createElement("p");
-				pre.innerHTML = talks;
-				para.appendChild(pre);
-				keepScrollButtom(para);
-				
-				db.transaction(populateDB, errorCB, successCB);
-        }
-
-        function onError(evt) {
-                myLog('<span style="color: red;">ERROR: ' + evt.data + '</span>');
-        }
-	
-        function doSend(message) {
-                myLog("SENT: " + message);
-                websocket.send(message);
-        }
-
-		function sendMessage() {
-			var msg = document.getElementById("message").value;
-			var one = document.getElementById("one").value;
-			var group = document.getElementById("group").value;
-			if(one) {	
-				var para = document.getElementById("messageBox");
-				var pre = document.createElement("p");
-				pre.innerHTML = "[S]"+localStorage.username+":"+msg;
-				para.appendChild(pre);
-				keepScrollButtom(para);
-				msg = "S+"+one+"+"+msg;  // single chat
-			} else if (group) {
-				msg = "G+"+group+"+"+msg;	// group chat
-			} else {
-				msg = "B+"+msg;				// broadcast chat
-			}
-			doSend(msg);
-		}
-
-		// database operate
-		function populateDB(tx) {
-			myLog("add history");
-			tx.executeSql('CREATE TABLE IF NOT EXISTS '+tbName+'(talks)');
-			tx.executeSql('INSERT INTO '+tbName+' VALUES("' + talks + '")');
-		}
-		
-		function showHistoryDB(tx) {
-			myLog("check history");
-			tx.executeSql('SELECT * FROM '+tbName, [], showHistorySuccess, errorCB);
-		}
-		
-		function clearHistoryDB(tx) {
-			myLog("clear history");
-			tx.executeSql('DROP TABLE IF EXISTS '+tbName);
-			tx.executeSql('CREATE TABLE IF NOT EXISTS '+tbName+'(talks)');
-			document.getElementById("chatHistory").innerHTML = '';
-		}
-		
-		function showHistorySuccess(tx, results) {
-    		var len = results.rows.length;
-			var para = document.getElementById("chatHistory");
-			if(len == 0) {
-				para.innerHTML = "no history";
-				return;
-			}
-			para.innerHTML = '';
-        	myLog(tbName+" table: " + len + " rows found.");
-			for (var i=0; i<len; i++){
-				myLog("Row = " + i + " history = " + results.rows.item(i).talks);
-				var pre = document.createElement("p");
-				pre.innerHTML = results.rows.item(i).talks;
-				para.appendChild(pre);
-				keepScrollButtom(para);
-			}
-    	}
-		
-		function errorCB(tx, err) {
-			alert("Error processing SQL: "+err);
-		}
-		
-		function successCB() {
-			myLog("database excute success!")
-		}
-
-		function showHistory() {
-			db.transaction(showHistoryDB, errorCB);
-		}
-
-		function clearHistory() {
-			db.transaction(clearHistoryDB, errorCB);
-		}
-
-        function chatError(err) {
-            var para = document.getElementById("chatError");
-            para.innerHTML = err;
-        }
-
-        function myLog(message) {
-            var pre = document.createElement("p");
-            pre.style.wordWrap = "break-word";
-            pre.innerHTML = message;
-            output.appendChild(pre);
-			keepScrollButtom(output);
-        }
-		
-		function keepScrollButtom(node) {
-			if(node.scrollHeight > node.clientHeight ) {
-				node.scrollTop = node.scrollHeight - node.clientHeight;
-			}
-		}
-
-		window.addEventListener("load", init, false);
-    </script>
+    
     </head>
-
     <body>
     <div class="container">
         <div id="userinfo">
@@ -184,8 +33,9 @@
                 <input type="button" onclick="showHistory()" id="history" value="show history" />
                 <input type="button" onclick="clearHistory()" value="clear history" />
             </div>
+            <input type="file" id="file" onchange="upFile()" />
         </div>
-        <div id="output"></div>
     </div>
+	<script type="text/javascript" src="js/chat.js"></script>
 </body>
 </html>

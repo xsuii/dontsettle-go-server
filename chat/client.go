@@ -6,9 +6,16 @@ import (
 	_ "github.com/Go-SQL-Driver/MySQL"
 	"io"
 	"log"
+	"os"
 	"strconv"
 	"strings"
 )
+
+type Talks struct {
+	Type   string
+	ToName string
+	Body   string
+}
 
 type connection struct {
 	uid    string // connection id
@@ -61,6 +68,7 @@ func (c *connection) Listen() {
 func (c *connection) listenRead() { // send to all
 	log.Println("read listen . . .")
 	var uid int
+	var talks Talks
 	for {
 		select {
 
@@ -70,16 +78,15 @@ func (c *connection) listenRead() { // send to all
 			log.Println("done from listen read")
 
 		default:
-			var msg string
-			err := websocket.Message.Receive(c.ws, &msg)
+			err := websocket.JSON.Receive(c.ws, &talks)
 			if err == io.EOF {
 				c.Done()
 				log.Println("default : done from listen read")
 			} else if err != nil {
 				c.server.Err(err)
 			} else {
-				temp := strings.Split(msg, "+") // later : use JSON identify with head&body
-				switch temp[0] {
+				log.Println(talks)
+				switch talks.Type {
 				case "S": // one-to-one chat. // this will get "S + send to + massage body".
 					db, err := sql.Open("mysql", "root:mrp520@/game")
 					checkError(err)
@@ -88,7 +95,7 @@ func (c *connection) listenRead() { // send to all
 					stmt, err := db.Prepare("SELECT uid FROM user WHERE username=?")
 					checkError(err)
 
-					rows, err := stmt.Query(temp[1])
+					rows, err := stmt.Query(talks.ToName)
 					checkError(err)
 
 					for rows.Next() {
@@ -103,7 +110,7 @@ func (c *connection) listenRead() { // send to all
 					var dId []string
 					dId = append(dId, strconv.Itoa(uid))
 					sId := c.uid
-					m := "[S]:" + c.author + ": " + temp[2]
+					m := "[S]:" + c.author + ": " + talks.Body
 					s := &pack{dUid: dId, sUid: sId, msg: m, t: "S"}
 
 					log.Println(s)
@@ -115,9 +122,9 @@ func (c *connection) listenRead() { // send to all
 
 					stmt, err := db.Prepare("SELECT uid FROM ingroup WHERE gid in(SELECT gid FROM game.group WHERE groupname=?)")
 
-					rows, err := stmt.Query(temp[1])
+					rows, err := stmt.Query(talks.ToName)
 
-					m := "[G:" + temp[1] + "]" + c.author + ": " + temp[2]
+					m := "[G:" + talks.ToName + "]" + c.author + ": " + talks.Body
 					var mem []string
 					for rows.Next() {
 						var uid string
@@ -131,7 +138,37 @@ func (c *connection) listenRead() { // send to all
 					log.Println(g)
 					c.server.transfer <- g
 				case "B":
-					c.server.BroadCast("[B]:" + c.author + ": " + temp[1])
+					c.server.BroadCast("[B]:" + c.author + ": " + talks.Body)
+				case "F": // should have a limit size
+					log.Println("get file:", talks.Body)
+
+					// store file in server side
+					var data []byte
+					websocket.Message.Receive(c.ws, &data)
+					f, err := os.Create("./repertory/" + talks.Body) // file name
+					checkError(err)
+					d := make([]byte, 4096)
+					l := len(data)
+					var p int
+					if l < 4096 {
+						d = data[0:]
+						_, err := f.Write(d)
+						checkError(err)
+					} else {
+						for p < l/4096 {
+							d = data[p*4096 : (p+1)*4096]
+							_, err := f.Write(d)
+							checkError(err)
+							p++
+						}
+						if l%4096 != 0 { // tail of file
+							d = data[p*4096:]
+							_, err := f.Write(d)
+							checkError(err)
+						}
+					}
+
+					// forwording file to target user
 				}
 			}
 		}
