@@ -1,1 +1,13 @@
- - Log system
+[...] Log system (log down server state)
+
+[...] config file (to initial server start)
+ 	- listening address
+ 	- database entry
+ 	- ...
+
+
+
+
+NOTE:
+	- "[...]" means going to do
+	- "[OK]" means finish
