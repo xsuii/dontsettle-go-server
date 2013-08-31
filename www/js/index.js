@@ -4,7 +4,6 @@ var wsuri = "ws://xsuii.meibu.net:8001/login"
 var origin = "http://xsuii.meibu.net"
 
 function init() {
-	output = document.getElementById("output");
 	onWebSocket();
 }
 

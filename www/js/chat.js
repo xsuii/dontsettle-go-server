@@ -6,8 +6,8 @@ var origin = "http://xsuii.meibu.net"
 var dbName = "history";
 var tbName = "h" + localStorage.uid;
 var db = window.openDatabase(dbName, "1.0", "history store", 1000);
-var talks;
 var f = document.getElementById("file");
+var talks;
 
 function init() {
 	onWebSocket();
@@ -30,16 +30,15 @@ function upFile() {
 }
 
 // database operate
-
 function createTable(tx) {
 	console.log("create table", tbName);
 	tx.executeSql('CREATE TABLE IF NOT EXISTS ' + tbName + '(talks)');
 }
 
 function addHistory(tx) {
-	console.log("add history", tbName);
+	console.log("add history to :", tbName);
 	tx.executeSql('CREATE TABLE IF NOT EXISTS ' + tbName + '(talks)');
-	tx.executeSql('INSERT INTO ' + tbName + ' VALUES("' + talks + '")');
+	tx.executeSql('INSERT INTO ' + tbName + ' VALUES("' + talks.Message + '")');
 }
 
 function showHistoryDB(tx) {
@@ -123,12 +122,16 @@ function onClose(evt) {
 }
 
 function onMessage(evt) {
-	talks = evt.data
-	console.log("RESPONSE: " + talks);
+	/*talks = evt.data;
+	console.log("RESPONSE: ", talks);*/
+	talks = JSON.parse(evt.data);
+	console.log("RESPONSE: ", talks);
+	
+	show = "["+talks.DstT+"]"+talks.Author+":"+talks.Message;
 
 	var para = document.getElementById("messageBox");
 	var pre = document.createElement("p");
-	pre.innerHTML = talks;
+	pre.innerHTML = show;
 	para.appendChild(pre);
 	keepScrollButtom(para);
 

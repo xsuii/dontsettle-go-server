@@ -8,34 +8,43 @@ import (
 	"net/http"
 )
 
+type Pack struct {
+	Author    string
+	Addressee string
+	Message   string
+	DateTime  string
+	Type      string // could be [file|meg]
+	DstT      string // could be [G|S]
+}
+
 // for one-to-one chat  [later:this can merge with group struct]
-type pack struct {
+type Postman struct {
 	sUid string
 	dUid []string
-	msg  string
+	pack Pack
 	t    string
 }
 
 type Server struct {
 	pattern     string
-	history     []string
+	history     []Pack
 	connections map[string]*connection // Registered connections
 	register    chan *connection
 	unregister  chan *connection
-	broadcast   chan string
-	transfer    chan *pack
+	broadcast   chan Pack
+	postman     chan *Postman
 	errCh       chan error
 	doneCh      chan bool
 	db          *sql.DB
 }
 
 func NewServer(pattern string) *Server {
-	history := []string{}
+	history := []Pack{}
 	connections := make(map[string]*connection)
 	register := make(chan *connection)
 	unregister := make(chan *connection)
-	broadcast := make(chan string)
-	transfer := make(chan *pack)
+	broadcast := make(chan Pack)
+	postman := make(chan *Postman)
 	errCh := make(chan error)
 	doneCh := make(chan bool)
 	db := &sql.DB{}
@@ -47,7 +56,7 @@ func NewServer(pattern string) *Server {
 		register,
 		unregister,
 		broadcast,
-		transfer,
+		postman,
 		errCh,
 		doneCh,
 		db,
@@ -64,12 +73,12 @@ func (s *Server) Unregister(c *connection) {
 	s.unregister <- c
 }
 
-func (s *Server) BroadCast(msg string) {
-	s.broadcast <- msg
+func (s *Server) BroadCast(pack Pack) {
+	s.broadcast <- pack
 }
 
-func (s *Server) Transfer(b *pack) {
-	s.transfer <- b
+func (s *Server) postman(b *Postman) {
+	s.postman <- b
 }
 
 func (s *Server) Done() {
@@ -87,14 +96,14 @@ func (s *Server) checkError(err error) {
 }
 
 func (s *Server) sendPastMessages(c *connection) {
-	for _, msg := range s.history {
-		c.Write(msg)
+	for _, pack := range s.history {
+		c.Write(pack)
 	}
 }
 
-func (s *Server) sendAll(msg string) {
+func (s *Server) sendAll(pack Pack) {
 	for _, c := range s.connections {
-		c.Write(msg)
+		c.Write(pack)
 	}
 }
 
@@ -106,18 +115,19 @@ func (s *Server) openDatabase() {
 }
 
 func (s *Server) closeDatabase() {
+	log.Println("close database")
 	err := s.db.Close()
 	s.checkError(err)
 }
 
-func (s *Server) offlineMsgStore(b *pack, offId []string) {
+func (s *Server) offlineMsgStore(b *Postman, offId []string) {
 	log.Println("store offline message")
 	var affect int
 	stmt, err := s.db.Prepare("INSERT offlinemessage SET duid=?, suid=?, message=?, type=?")
 	s.checkError(err)
 
 	for _, d := range offId {
-		_, err := stmt.Exec(d, b.sUid, b.msg, b.t)
+		_, err := stmt.Exec(d, b.sUid, b.pack.Message, b.t)
 		s.checkError(err)
 		affect++
 	}
@@ -155,9 +165,9 @@ func (s *Server) Listen() {
 			close(c.send)
 		case bmsg := <-s.broadcast:
 			log.Println("broadcast : ", bmsg)
-			s.history = append(s.history, bmsg)
+			//s.history = append(s.history, bmsg)
 			s.sendAll(bmsg)
-		case tr := <-s.transfer: // Responsible for distributing information(include one-to-one、one-to-many)
+		case tr := <-s.postman: // Responsible for distributing information(include one-to-one、one-to-many)
 			log.Println(tr)
 			s.openDatabase()
 			var off []string
@@ -169,7 +179,7 @@ func (s *Server) Listen() {
 					continue
 				}
 				select {
-				case c.send <- tr.msg:
+				case c.send <- tr.pack:
 				}
 			}
 			s.offlineMsgStore(tr, off)
