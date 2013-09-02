@@ -24,8 +24,7 @@
                         <input type="text" placeholder="one" id="one" />
                         <br/>
                         <input type="text" placeholder="group" id="group" />
-                    </div>
-                    <div id="chatError"></div>
+                    </div> 
                 </form>
             </div>
             <div id="historyWrapper">
@@ -33,8 +32,10 @@
                 <input type="button" onclick="showHistory()" id="history" value="show history" />
                 <input type="button" onclick="clearHistory()" value="clear history" />
             </div>
-            <input type="file" id="file" onchange="upFile()" />
+            <input type="file" id="file" />
+            <input type="button" id="send" onclick="upFile()" value="send" />
         </div>
+        <div id="chatError"></div>
     </div>
 	<script type="text/javascript" src="js/chat.js"></script>
 </body>

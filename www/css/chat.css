@@ -37,3 +37,7 @@
 #history {
 	float: right;
 }
+
+.container #chatError p{
+	color: #F00;
+}
