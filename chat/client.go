@@ -3,6 +3,7 @@ package chat
 import (
 	"code.google.com/p/go.net/websocket"
 	"database/sql"
+	"encoding/json"
 	_ "github.com/Go-SQL-Driver/MySQL"
 	"io"
 	"log"
@@ -10,10 +11,9 @@ import (
 	"strings"
 )
 
-type Talks struct {
-	Type   string
-	ToName string
-	Body   string
+type File struct {
+	FileName string
+	Body     string
 }
 
 type connection struct {
@@ -31,11 +31,11 @@ func NewClient(ws *websocket.Conn, server *Server) *connection {
 	var msg string
 	websocket.Message.Receive(ws, &msg) // get uid & author
 	temp := strings.Split(msg, "+")
-	log.Println(" - uid : ", temp[0], " - author : ", temp[1], " - ")
+	log.Println(" - author : ", temp[0], " - uid : ", temp[1], " - ")
 
 	return &connection{
-		uid:    temp[0],
-		author: temp[1],
+		author: temp[0],
+		uid:    temp[1],
 		ws:     ws,
 		server: server,
 		send:   make(chan Pack),
@@ -66,22 +66,31 @@ func (c *connection) Listen() {
 }
 
 func (c *connection) GetUids(t string, whom string) []string {
+	log.Println("get", whom, "'s uid")
 	var uid string
 	var dUid []string
 	var stmt *sql.Stmt
+	var rows *sql.Rows
 	var err error
 	c.server.openDatabase()
 
 	if t == "S" {
 		stmt, err = c.server.db.Prepare("SELECT uid FROM user WHERE username=?")
 		checkError(err)
+		rows, err = stmt.Query(whom)
+		checkError(err)
 	} else if t == "G" {
 		stmt, err = c.server.db.Prepare("SELECT uid FROM ingroup WHERE gid in(SELECT gid FROM game.group WHERE groupname=?)")
 		checkError(err)
+		rows, err = stmt.Query(whom)
+		checkError(err)
+	} else if t == "B" {
+		rows, err = c.server.db.Query("SELECT uid FROM user")
+		checkError(err)
+	} else {
+		log.Println("error destination type")
+		return nil
 	}
-
-	rows, err := stmt.Query(whom)
-	checkError(err)
 
 	for rows.Next() {
 		err = rows.Scan(&uid)
@@ -94,13 +103,22 @@ func (c *connection) GetUids(t string, whom string) []string {
 	return dUid
 }
 
-func (c *connection) StoreFile(filename string) {
+func (c *connection) StoreFile(path string, filename string) {
 	// store file in server side
 	var data []byte
-	log.Println("begin to store file")
+	log.Println("begin to store file:", path, filename)
 	websocket.Message.Receive(c.ws, &data)
-	f, err := os.Create("./repertory/" + filename) // file name
+
+	err := os.MkdirAll("./repertory/"+path, 0777)
 	checkError(err)
+
+	f, err := os.Create("./repertory/" + path + "/" + filename) // file name
+	checkError(err)
+	defer func() {
+		err := f.Close()
+		checkError(err)
+	}()
+
 	d := make([]byte, 4096)
 	l := len(data)
 	var p int
@@ -124,9 +142,64 @@ func (c *connection) StoreFile(filename string) {
 	log.Println("finish storing file")
 }
 
+func (c *connection) DownloadFile(path string, pack Pack) {
+	log.Println("begin to download file:", path, pack.Message)
+
+	f, err := os.Open("./repertory/" + path + "/" + pack.Message)
+	checkError(err)
+	defer func() {
+		err := f.Close()
+		checkError(err)
+		log.Println("download file done")
+	}()
+
+	buf := make([]byte, 1024)
+	var data []byte
+	for {
+		n, err := f.Read(buf)
+		log.Println(n)
+		log.Println(err)
+		if err != nil && err != io.EOF {
+			checkError(err)
+		}
+		if n != 0 {
+			if n < 1024 {
+				data = append(data, buf[0:n]...)
+			} else {
+				data = append(data, buf...)
+			}
+		} else {
+			break
+		}
+	}
+	log.Println("read:", data)
+
+	fi := &File{
+		FileName: pack.Message,
+		Body:     string(data),
+	}
+	log.Println("before json marshal", fi)
+
+	file, err := json.Marshal(fi)
+	checkError(err)
+
+	log.Println("after json marshal", string(file))
+
+	p := &Pack{
+		Author:    "MASTER",
+		Addressee: c.author,
+		Message:   string(file),
+		DateTime:  pack.DateTime,
+		Type:      pack.Type,
+		DstT:      pack.DstT,
+	}
+	websocket.JSON.Send(c.ws, p)
+}
+
 func (c *connection) listenRead() { // send to all
 	log.Println("read listen . . .")
-	var talks Talks
+	var pack Pack
+	var path string
 	for {
 		select {
 
@@ -134,87 +207,43 @@ func (c *connection) listenRead() { // send to all
 			c.server.Unregister(c)
 			c.Done()
 			log.Println("done from listen read")
-
 		default:
-			err := websocket.JSON.Receive(c.ws, &talks)
+			err := websocket.JSON.Receive(c.ws, &pack)
+			log.Println(pack)
 			if err == io.EOF {
 				c.Done()
 				log.Println("default : done from listen read")
 			} else if err != nil {
 				c.server.Err(err)
 			} else {
-				log.Println(talks)
-				switch talks.Type {
-				case "S":
-					// one-to-one chat.
-					// this will get "S + send to + massage body".
-					dst := c.GetUids("S", talks.ToName)
-					//m := "[S]:" + c.author + ": " + talks.Body
-					m := Pack{
-						Author:    c.author,
-						Addressee: talks.ToName,
-						Message:   talks.Body,
-						DateTime:  "",
-						Type:      "MSG",
-						DstT:      "S"}
-					p := &Postman{
-						sUid: c.uid,
-						dUid: dst,
-						pack: m,
-						t:    "S"}
-
-					log.Println(p)
-					c.server.postman <- p
-				case "G": // one-to-many chat.  // this will get "G + send to + massage body".
-					dst := c.GetUids("G", talks.ToName)
-					m := Pack{
-						Author:    c.author,
-						Addressee: talks.ToName,
-						Message:   talks.Body,
-						DateTime:  "",
-						Type:      "MSG",
-						DstT:      "G"}
-					p := &Postman{
-						sUid: c.uid,
-						dUid: dst,
-						pack: m,
-						t:    "G"}
-					log.Println(p)
-
-					c.server.postman <- p
-				case "B":
-					m := Pack{
-						Author:    c.author,
-						Addressee: talks.ToName,
-						Message:   talks.Body,
-						DateTime:  "",
-						Type:      "MSG",
-						DstT:      "B"}
-					c.server.BroadCast(m)
-				case "F":
-					// recieve file the client upload
-					// [later] should have a limit size(client side)
-					// talks struct( "body" field : file name , "ToName" field : to whom )
-					log.Println("get file:", talks.Body)
-
-					c.StoreFile(talks.Body)
-
-					// forwording file to target user
-					d := c.GetUids("S", talks.ToName)
-					m := Pack{
-						Author:    c.author,
-						Addressee: talks.ToName,
-						Message:   talks.Body,
-						DateTime:  "",
-						Type:      "FILE",
-						DstT:      "S"}
-					p := &Postman{
-						sUid: c.uid,
-						dUid: d,
-						pack: m,
-						t:    "S"}
-					c.server.postman <- p
+				// this will deal one-to-one、one-to-many、broadcast、file
+				log.Println(pack)
+				dst := c.GetUids(pack.DstT, pack.Addressee)
+				if pack.Type == "FILE" {
+					if c.uid == dst[0] { // 如果收件人和发件人相同，意味着发件人使用邮件领取单领取邮件（这里是下载已上传的文件）
+						log.Println(c.author, "download file:", pack.Message)
+						sUid := c.GetUids(pack.DstT, pack.Author)
+						path = sUid[0] + "/" + c.uid // get download file's path
+						c.DownloadFile(path, pack)
+						break
+					}
+					path = c.uid + "/" + dst[0]
+					log.Println(c.author, "upload file:", pack.Message)
+					c.StoreFile(path, pack.Message)
 				}
+				m := Pack{
+					Author:    c.author,
+					Addressee: pack.Addressee,
+					Message:   pack.Message,
+					DateTime:  pack.DateTime,
+					Type:      pack.Type,
+					DstT:      pack.DstT}
+				p := &Postman{
+					sUid: c.uid,
+					dUid: dst,
+					pack: m}
+				log.Println(p)
+				c.server.Post(p)
 			}
 		}
 	}

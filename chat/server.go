@@ -11,7 +11,7 @@ import (
 type Pack struct {
 	Author    string
 	Addressee string
-	Message   string
+	Message   string // filename when Type=file
 	DateTime  string
 	Type      string // could be [file|meg]
 	DstT      string // could be [G|S]
@@ -22,7 +22,6 @@ type Postman struct {
 	sUid string
 	dUid []string
 	pack Pack
-	t    string
 }
 
 type Server struct {
@@ -77,8 +76,8 @@ func (s *Server) BroadCast(pack Pack) {
 	s.broadcast <- pack
 }
 
-func (s *Server) postman(b *Postman) {
-	s.postman <- b
+func (s *Server) Post(p *Postman) {
+	s.postman <- p
 }
 
 func (s *Server) Done() {
@@ -127,7 +126,7 @@ func (s *Server) offlineMsgStore(b *Postman, offId []string) {
 	s.checkError(err)
 
 	for _, d := range offId {
-		_, err := stmt.Exec(d, b.sUid, b.pack.Message, b.t)
+		_, err := stmt.Exec(d, b.sUid, b.pack.Message, b.pack.DstT)
 		s.checkError(err)
 		affect++
 	}
@@ -171,6 +170,7 @@ func (s *Server) Listen() {
 			log.Println(tr)
 			s.openDatabase()
 			var off []string
+			log.Println(s.connections)
 			for _, g := range tr.dUid {
 				c := s.connections[g]
 				if c == nil {
@@ -182,7 +182,9 @@ func (s *Server) Listen() {
 				case c.send <- tr.pack:
 				}
 			}
-			s.offlineMsgStore(tr, off)
+			if len(off) > 0 {
+				s.offlineMsgStore(tr, off)
+			}
 			s.closeDatabase()
 		case err := <-s.errCh: // [bug] this dosen's work well
 			log.Println(err.Error())
