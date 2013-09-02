@@ -142,6 +142,7 @@ func (c *connection) StoreFile(path string, filename string) {
 	log.Println("finish storing file")
 }
 
+// this should work by pieces.
 func (c *connection) DownloadFile(path string, pack Pack) {
 	log.Println("begin to download file:", path, pack.Message)
 
@@ -157,8 +158,6 @@ func (c *connection) DownloadFile(path string, pack Pack) {
 	var data []byte
 	for {
 		n, err := f.Read(buf)
-		log.Println(n)
-		log.Println(err)
 		if err != nil && err != io.EOF {
 			checkError(err)
 		}
@@ -172,18 +171,14 @@ func (c *connection) DownloadFile(path string, pack Pack) {
 			break
 		}
 	}
-	log.Println("read:", data)
 
 	fi := &File{
 		FileName: pack.Message,
 		Body:     string(data),
 	}
-	log.Println("before json marshal", fi)
 
 	file, err := json.Marshal(fi)
 	checkError(err)
-
-	log.Println("after json marshal", string(file))
 
 	p := &Pack{
 		Author:    "MASTER",
