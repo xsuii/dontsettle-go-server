@@ -71,6 +71,7 @@ function upFile() {
 			"Type": "FILE",
 			"DstT": "S"
 		}));
+		console.log(bytes.target.result.toString());
 		doSend(bytes.target.result);
 	};
 	reader.readAsArrayBuffer(f.files[0]);
@@ -134,12 +135,6 @@ function showHistory() {
 function clearHistory() {
 	db.transaction(clearHistoryDB, errorCB);
 }
-
-function chatError(err) {
-	var para = document.getElementById("chatError");
-	para.innerHTML = err;
-}
-
 
 //////////////////////// WebSocket //////////////////////////////
 
@@ -211,14 +206,13 @@ function onMessage(evt) {
 		}
 	} else if (talks.Type == "FILE" && talks.Author == "MASTER") { // recieve file
 		file = JSON.parse(talks.Message)
-		console.log(fs,"begin to recieve file",file.FileName);
+		console.log(fs, "begin to recieve file", file.FileName);
 		fs.root.getFile(file.FileName, {
 			create: true
 		}, function(fileEntry) {
 			fileEntry.createWriter(function(fileWriter) {
 				console.log("file_writer_test_s");
 				fileWriter.onwriteend = function(e) {
-					
 					console.log("get file done");
 				};
 
@@ -226,9 +220,10 @@ function onMessage(evt) {
 					console.log("write error");
 				};
 
-				var blob = new Blob([file.Body], {type: "text/plain"});
+				var blob = new Blob([file.Body], {
+					type: "text/plain"
+				});
 				fileWriter.write(blob);
-				//fileWriter.write(file.Body);
 			}, errorFile);
 		}, errorFile);
 		console.log("file_writer_test_e");
@@ -278,6 +273,11 @@ function sendMessage() {
 		pack["Addressee"] = "broadcast";
 	}
 	doSend(JSON.stringify(pack));
+}
+
+function chatError(err) {
+	var para = document.getElementById("chatError");
+	para.innerHTML = err;
 }
 
 function keepScrollButtom(node) {

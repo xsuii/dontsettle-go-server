@@ -88,12 +88,6 @@ func (s *Server) Err(err error) {
 	s.errCh <- err
 }
 
-func (s *Server) checkError(err error) {
-	if err != nil {
-		log.Println(err.Error())
-	}
-}
-
 func (s *Server) sendPastMessages(c *connection) {
 	for _, pack := range s.history {
 		c.Write(pack)
@@ -110,24 +104,32 @@ func (s *Server) openDatabase() {
 	log.Println("open database")
 	var err error
 	s.db, err = sql.Open("mysql", "root:mrp520@/game")
-	s.checkError(err)
+	if err != nil {
+		log.Println("Error:", err.Error())
+	}
 }
 
 func (s *Server) closeDatabase() {
 	log.Println("close database")
 	err := s.db.Close()
-	s.checkError(err)
+	if err != nil {
+		log.Println("Error:", err.Error())
+	}
 }
 
 func (s *Server) offlineMsgStore(b *Postman, offId []string) {
 	log.Println("store offline message")
 	var affect int
 	stmt, err := s.db.Prepare("INSERT offlinemessage SET duid=?, suid=?, message=?, type=?")
-	s.checkError(err)
+	if err != nil {
+		log.Println("Error:", err.Error())
+	}
 
 	for _, d := range offId {
 		_, err := stmt.Exec(d, b.sUid, b.pack.Message, b.pack.DstT)
-		s.checkError(err)
+		if err != nil {
+			log.Println("Error:", err.Error())
+		}
 		affect++
 	}
 

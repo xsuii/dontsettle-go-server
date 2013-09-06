@@ -76,17 +76,27 @@ func (c *connection) GetUids(t string, whom string) []string {
 
 	if t == "S" {
 		stmt, err = c.server.db.Prepare("SELECT uid FROM user WHERE username=?")
-		checkError(err)
+		if err != nil {
+			log.Println("Error:", err.Error())
+		}
 		rows, err = stmt.Query(whom)
-		checkError(err)
+		if err != nil {
+			log.Println("Error:", err.Error())
+		}
 	} else if t == "G" {
 		stmt, err = c.server.db.Prepare("SELECT uid FROM ingroup WHERE gid in(SELECT gid FROM game.group WHERE groupname=?)")
-		checkError(err)
+		if err != nil {
+			log.Println("Error:", err.Error())
+		}
 		rows, err = stmt.Query(whom)
-		checkError(err)
+		if err != nil {
+			log.Println("Error:", err.Error())
+		}
 	} else if t == "B" {
 		rows, err = c.server.db.Query("SELECT uid FROM user")
-		checkError(err)
+		if err != nil {
+			log.Println("Error:", err.Error())
+		}
 	} else {
 		log.Println("error destination type")
 		return nil
@@ -94,7 +104,9 @@ func (c *connection) GetUids(t string, whom string) []string {
 
 	for rows.Next() {
 		err = rows.Scan(&uid)
-		checkError(err)
+		if err != nil {
+			log.Println("Error:", err.Error())
+		}
 		dUid = append(dUid, uid)
 	}
 	log.Println(dUid)
@@ -107,16 +119,31 @@ func (c *connection) StoreFile(path string, filename string) {
 	// store file in server side
 	var data []byte
 	log.Println("begin to store file:", path, filename)
-	websocket.Message.Receive(c.ws, &data)
+	err := websocket.Message.Receive(c.ws, &data)
+	if err != nil {
+		log.Println("Error:", err.Error())
+	}
 
-	err := os.MkdirAll("./repertory/"+path, 0777)
-	checkError(err)
+	if len(data) > 50 {
+		log.Println("DEBUG : Receive file data :", string(data[:50]))
+	} else {
+		log.Println("DEBUG : Receive file data :", string(data))
+	}
 
-	f, err := os.Create("./repertory/" + path + "/" + filename) // file name
-	checkError(err)
+	err = os.MkdirAll("./repertory/"+path, 0777)
+	if err != nil {
+		log.Println("Error:", err.Error())
+	}
+
+	f, err := os.Create("./repertory/" + path + "/" + filename) // file name. it should be deleted if exist or add datetime as filename
+	if err != nil {
+		log.Println("Error:", err.Error())
+	}
 	defer func() {
 		err := f.Close()
-		checkError(err)
+		if err != nil {
+			log.Println("Error:", err.Error())
+		}
 	}()
 
 	d := make([]byte, 4096)
@@ -125,18 +152,24 @@ func (c *connection) StoreFile(path string, filename string) {
 	if l < 4096 {
 		d = data[0:]
 		_, err := f.Write(d)
-		checkError(err)
+		if err != nil {
+			log.Println("Error:", err.Error())
+		}
 	} else {
 		for p < l/4096 {
 			d = data[p*4096 : (p+1)*4096]
 			_, err := f.Write(d)
-			checkError(err)
+			if err != nil {
+				log.Println("Error:", err.Error())
+			}
 			p++
 		}
 		if l%4096 != 0 { // tail of file
 			d = data[p*4096:]
 			_, err := f.Write(d)
-			checkError(err)
+			if err != nil {
+				log.Println("Error:", err.Error())
+			}
 		}
 	}
 	log.Println("finish storing file")
@@ -147,10 +180,14 @@ func (c *connection) DownloadFile(path string, pack Pack) {
 	log.Println("begin to download file:", path, pack.Message)
 
 	f, err := os.Open("./repertory/" + path + "/" + pack.Message)
-	checkError(err)
+	if err != nil {
+		log.Println("Error:", err.Error())
+	}
 	defer func() {
 		err := f.Close()
-		checkError(err)
+		if err != nil {
+			log.Println("Error:", err.Error())
+		}
 		log.Println("download file done")
 	}()
 
@@ -159,7 +196,9 @@ func (c *connection) DownloadFile(path string, pack Pack) {
 	for {
 		n, err := f.Read(buf)
 		if err != nil && err != io.EOF {
-			checkError(err)
+			if err != nil {
+				log.Println("Error:", err.Error())
+			}
 		}
 		if n != 0 {
 			if n < 1024 {
@@ -172,13 +211,22 @@ func (c *connection) DownloadFile(path string, pack Pack) {
 		}
 	}
 
+	// observe data encode
+	if len(data) > 50 {
+		log.Println(string(data[:50]))
+	} else {
+		log.Println(string(data))
+	}
+
 	fi := &File{
 		FileName: pack.Message,
 		Body:     string(data),
 	}
 
 	file, err := json.Marshal(fi)
-	checkError(err)
+	if err != nil {
+		log.Println("Error:", err.Error())
+	}
 
 	p := &Pack{
 		Author:    "MASTER",
@@ -215,7 +263,9 @@ func (c *connection) listenRead() { // send to all
 				log.Println(pack)
 				dst := c.GetUids(pack.DstT, pack.Addressee)
 				if pack.Type == "FILE" {
-					if c.uid == dst[0] { // 如果收件人和发件人相同，意味着发件人使用邮件领取单领取邮件（这里是下载已上传的文件）
+					if c.uid == dst[0] {
+						// 如果收件人和发件人相同，意味着发件人使用邮件领取单领取邮件（这里是下载已上传的文件）
+						// [+] if file upload not done yet
 						log.Println(c.author, "download file:", pack.Message)
 						sUid := c.GetUids(pack.DstT, pack.Author)
 						path = sUid[0] + "/" + c.uid // get download file's path
@@ -258,11 +308,5 @@ func (c *connection) listenWrite() {
 			log.Println("done from listen write")
 			return
 		}
-	}
-}
-
-func checkError(err error) {
-	if err != nil {
-		log.Println(err.Error())
 	}
 }

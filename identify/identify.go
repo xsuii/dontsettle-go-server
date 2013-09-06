@@ -32,32 +32,44 @@ func Login(ws *websocket.Conn) {
 	var username string
 
 	db, err := sql.Open("mysql", "root:mrp520@/game") // connect database
-	checkErr(err)
+	if err != nil {
+		log.Println("Error:", err.Error())
+	}
 	log.Println("mysql connect success . . .")
 	defer func() {
 		err = db.Close()
-		checkErr(err)
+		if err != nil {
+			log.Println("Error:", err.Error())
+		}
 		log.Println("close database . . .")
 	}()
 
 	for { // keep until login success
 		// get login imformation from client
 		err = websocket.JSON.Receive(ws, &login)
-		checkErr(err)
+		if err != nil {
+			log.Println("Error:", err.Error())
+		}
 		log.Println("Receive login message : [ Username:", login.Username, " ]  [ Password:", login.Userpasswd, " ]")
 
 		stmt, err := db.Prepare("select UID, username, userpassword from user where username=? && userpassword=?")
-		checkErr(err)
+		if err != nil {
+			log.Println("Error:", err.Error())
+		}
 
 		rows, err := stmt.Query(login.Username, login.Userpasswd) // temp contants username and password which split before
-		checkErr(err)
+		if err != nil {
+			log.Println("Error:", err.Error())
+		}
 
 		for rows.Next() {
 			var userpassword string
 			effect++
 
 			err = rows.Scan(&uid, &username, &userpassword)
-			checkErr(err)
+			if err != nil {
+				log.Println("Error:", err.Error())
+			}
 
 			log.Println("MySQL : [ UID:", uid, " ]  [ Username:", username, " ]  [ Password:", userpassword, " ]")
 		}
@@ -82,18 +94,24 @@ func Register(ws *websocket.Conn) {
 	var reply string
 
 	db, err := sql.Open("mysql", "root:mrp520@/game") // connect database
-	checkErr(err)
+	if err != nil {
+		log.Println("Error:", err.Error())
+	}
 	log.Println("mysql connect success . . .")
 	defer func() {
 		err = db.Close()
-		checkErr(err)
+		if err != nil {
+			log.Println("Error:", err.Error())
+		}
 		log.Println("close database . . .")
 	}()
 
 	for {
 		// get register imformations
 		err = websocket.JSON.Receive(ws, &reply)
-		checkErr(err)
+		if err != nil {
+			log.Println("Error:", err.Error())
+		}
 
 		temp := strings.Split(reply, "+")
 
@@ -101,10 +119,14 @@ func Register(ws *websocket.Conn) {
 
 		// apply register to database
 		stmt, err := db.Prepare("INSERT user SET username=?, email=?, userpassword=?")
-		checkErr(err)
+		if err != nil {
+			log.Println("Error:", err.Error())
+		}
 
 		_, err = stmt.Exec(temp[0], temp[1], temp[2])
-		checkErr(err)
+		if err != nil {
+			log.Println("Error:", err.Error())
+		}
 
 		if err != nil {
 			websocket.JSON.Send(ws, "REGISTER_FAIL")
