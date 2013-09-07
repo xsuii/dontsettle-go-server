@@ -14,14 +14,14 @@ type Pack struct {
 	Message   string // filename when Type=file
 	DateTime  string
 	Type      string // could be [file|meg]
-	DstT      string // could be [G|S]
+	DstT      string // could be [G|S|B](group, single, broadcast)
 }
 
 // for one-to-one chat  [later:this can merge with group struct]
 type Postman struct {
 	sUid string
 	dUid []string
-	pack Pack
+	pack *Pack
 }
 
 type Server struct {
@@ -90,18 +90,18 @@ func (s *Server) Err(err error) {
 
 func (s *Server) sendPastMessages(c *connection) {
 	for _, pack := range s.history {
-		c.Write(pack)
+		c.Write(&pack)
 	}
 }
 
 func (s *Server) sendAll(pack Pack) {
 	for _, c := range s.connections {
-		c.Write(pack)
+		c.Write(&pack)
 	}
 }
 
-func (s *Server) openDatabase() {
-	log.Println("open database")
+func (s *Server) openDatabase(who string) {
+	log.Println(who, "open database")
 	var err error
 	s.db, err = sql.Open("mysql", "root:mrp520@/game")
 	if err != nil {
@@ -109,8 +109,8 @@ func (s *Server) openDatabase() {
 	}
 }
 
-func (s *Server) closeDatabase() {
-	log.Println("close database")
+func (s *Server) closeDatabase(who string) {
+	log.Println(who, "close database")
 	err := s.db.Close()
 	if err != nil {
 		log.Println("Error:", err.Error())
@@ -120,13 +120,13 @@ func (s *Server) closeDatabase() {
 func (s *Server) offlineMsgStore(b *Postman, offId []string) {
 	log.Println("store offline message")
 	var affect int
-	stmt, err := s.db.Prepare("INSERT offlinemessage SET duid=?, suid=?, message=?, type=?")
+	stmt, err := s.db.Prepare("INSERT offlinemessage SET duid=?, suid=?, time=?, message=?, packtype=?, dsttype=?")
 	if err != nil {
 		log.Println("Error:", err.Error())
 	}
 
 	for _, d := range offId {
-		_, err := stmt.Exec(d, b.sUid, b.pack.Message, b.pack.DstT)
+		_, err := stmt.Exec(d, b.sUid, b.pack.DateTime, b.pack.Message, b.pack.Type, b.pack.DstT)
 		if err != nil {
 			log.Println("Error:", err.Error())
 		}
@@ -159,7 +159,8 @@ func (s *Server) Listen() {
 		select {
 		case c := <-s.register:
 			s.connections[c.uid] = c
-			log.Println("New Client : ", c.uid, s.connections)
+			log.Println("Client Register : ", c.uid)
+			log.Println("Current connection :", s.connections)
 		case c := <-s.unregister:
 			log.Println("Delete Client : ", c.uid)
 			delete(s.connections, c.uid)
@@ -169,10 +170,11 @@ func (s *Server) Listen() {
 			//s.history = append(s.history, bmsg)
 			s.sendAll(bmsg)
 		case tr := <-s.postman: // Responsible for distributing information(include one-to-one、one-to-many)
-			log.Println(tr)
-			s.openDatabase()
+			log.Println("postman :", tr)
+			s.openDatabase("Postman")
 			var off []string
-			log.Println(s.connections)
+			log.Println("postman check connect:", s.connections)
+
 			for _, g := range tr.dUid {
 				c := s.connections[g]
 				if c == nil {
@@ -187,7 +189,7 @@ func (s *Server) Listen() {
 			if len(off) > 0 {
 				s.offlineMsgStore(tr, off)
 			}
-			s.closeDatabase()
+			s.closeDatabase("Postman")
 		case err := <-s.errCh: // [bug] this dosen's work well
 			log.Println(err.Error())
 		case <-s.doneCh: // when server close
