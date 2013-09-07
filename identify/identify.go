@@ -32,6 +32,7 @@ func Login(ws *websocket.Conn) {
 	var username string
 
 	db, err := sql.Open("mysql", "root:mrp520@/game") // connect database
+	log.Println("open database")
 	if err != nil {
 		log.Println("Error:", err.Error())
 	}
@@ -75,10 +76,9 @@ func Login(ws *websocket.Conn) {
 		}
 
 		if effect > 0 {
-			log.Println(uid, "login success . . .")
+			log.Println(uid, "(uid) login success.")
 			t := strconv.Itoa(uid)
 			websocket.Message.Send(ws, t)
-
 			return
 		} else {
 			websocket.Message.Send(ws, "0")

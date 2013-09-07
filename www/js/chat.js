@@ -251,7 +251,7 @@ function sendMessage() {
 	var t = new Date();
 	var pack = {
 		"Message": msg,
-		"DataTime": t.toUTCString(),
+		"DateTime": t.toUTCString(),
 		"Type": "MSG"
 	};
 	if (one) {
