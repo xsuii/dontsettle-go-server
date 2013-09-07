@@ -21,13 +21,13 @@ type connection struct {
 	author string
 	ws     *websocket.Conn // connection socket
 	server *Server         // the server was connected
-	send   chan Pack       // message channel
+	send   chan *Pack      // message channel
 	doneCh chan bool
 }
 
 // [later:JSON]
 func NewClient(ws *websocket.Conn, server *Server) *connection {
-	log.Println("new client . . .")
+	log.Println("client constructed")
 	var msg string
 	websocket.Message.Receive(ws, &msg) // get uid & author
 	temp := strings.Split(msg, "+")
@@ -38,7 +38,7 @@ func NewClient(ws *websocket.Conn, server *Server) *connection {
 		uid:    temp[1],
 		ws:     ws,
 		server: server,
-		send:   make(chan Pack),
+		send:   make(chan *Pack),
 		doneCh: make(chan bool)}
 }
 
@@ -46,7 +46,7 @@ func (c *connection) Conn() *websocket.Conn { // get client's connection
 	return c.ws
 }
 
-func (c *connection) Write(pack Pack) {
+func (c *connection) Write(pack *Pack) {
 	select {
 	case c.send <- pack:
 	default:
@@ -62,17 +62,111 @@ func (c *connection) Done() {
 func (c *connection) Listen() {
 	log.Println("client listening")
 	go c.listenWrite()
+	c.OfflinePush()
 	c.listenRead()
+}
+
+func (c *connection) OfflinePush() {
+	var (
+		suid string
+		msg  string
+		time string
+		t    string
+		dt   string
+	)
+	log.Println("offline message push")
+	c.server.openDatabase("offlinepusher")
+	defer func() {
+		c.server.closeDatabase("offlinepusher")
+		log.Println("offline message push to %s over", c.uid)
+	}()
+
+	stmt, err := c.server.db.Prepare("SELECT sUID, time, message, packtype, dsttype FROM offlinemessage WHERE dUID=?")
+	if err != nil {
+		log.Println(err.Error())
+	}
+
+	rows, err := stmt.Query(c.uid)
+	if err != nil {
+		log.Println(err.Error())
+	}
+
+	for rows.Next() {
+		err = rows.Scan(&suid, &time, &msg, &t, &dt)
+		if err != nil {
+			log.Println(err.Error())
+		}
+		at := c.GetName(suid)
+		ad := c.GetName(c.uid)
+		m := &Pack{
+			Author:    at,
+			Addressee: ad,
+			Message:   msg,
+			DateTime:  time,
+			Type:      t,
+			DstT:      dt,
+		}
+		p := &Postman{
+			sUid: suid,
+			dUid: []string{c.uid},
+			pack: m,
+		}
+		c.server.Post(p)
+	}
+
+	c.server.openDatabase("delete")
+	stmt, err = c.server.db.Prepare("DELETE FROM offlinemessage WHERE dUID=?")
+	if err != nil {
+		log.Println(err.Error())
+	}
+
+	_, err = stmt.Exec(c.uid)
+	if err != nil {
+		log.Println(err.Error())
+	}
+}
+
+func (c *connection) GetName(id string) string {
+	var name string
+	log.Println("get name with uid")
+	c.server.openDatabase("GetName()")
+	defer func() {
+		c.server.closeDatabase("GetName()")
+	}()
+
+	stmt, err := c.server.db.Prepare("SELECT username FROM user WHERE uid=?")
+	if err != nil {
+		log.Println(err.Error())
+	}
+
+	rows, err := stmt.Query(id)
+	if err != nil {
+		log.Println(err.Error())
+	}
+
+	for rows.Next() {
+		err = rows.Scan(&name)
+		if err != nil {
+			log.Println(err.Error())
+		}
+	}
+	log.Println("get:", name)
+	return name
 }
 
 func (c *connection) GetUids(t string, whom string) []string {
 	log.Println("get", whom, "'s uid")
-	var uid string
-	var dUid []string
-	var stmt *sql.Stmt
-	var rows *sql.Rows
-	var err error
-	c.server.openDatabase()
+	var (
+		uid  string
+		dUid []string
+		stmt *sql.Stmt
+		rows *sql.Rows
+		err  error
+	)
+	c.server.openDatabase("GetUids()")
+	defer func() {
+		c.server.closeDatabase("GetUids()")
+	}()
 
 	if t == "S" {
 		stmt, err = c.server.db.Prepare("SELECT uid FROM user WHERE username=?")
@@ -111,7 +205,6 @@ func (c *connection) GetUids(t string, whom string) []string {
 	}
 	log.Println(dUid)
 
-	c.server.closeDatabase()
 	return dUid
 }
 
@@ -240,7 +333,7 @@ func (c *connection) DownloadFile(path string, pack Pack) {
 }
 
 func (c *connection) listenRead() { // send to all
-	log.Println("read listen . . .")
+	log.Println("listening read")
 	var pack Pack
 	var path string
 	for {
@@ -251,6 +344,9 @@ func (c *connection) listenRead() { // send to all
 			c.Done()
 			log.Println("done from listen read")
 		default:
+			/*var test string
+			err := websocket.Message.Receive(c.ws, &test)
+			log.Println(test)*/
 			err := websocket.JSON.Receive(c.ws, &pack)
 			log.Println(pack)
 			if err == io.EOF {
@@ -276,7 +372,7 @@ func (c *connection) listenRead() { // send to all
 					log.Println(c.author, "upload file:", pack.Message)
 					c.StoreFile(path, pack.Message)
 				}
-				m := Pack{
+				m := &Pack{
 					Author:    c.author,
 					Addressee: pack.Addressee,
 					Message:   pack.Message,
@@ -295,7 +391,7 @@ func (c *connection) listenRead() { // send to all
 }
 
 func (c *connection) listenWrite() {
-	log.Println("write listen . . .")
+	log.Println("listening write")
 	for {
 		select {
 		case message := <-c.send:
