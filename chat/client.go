@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	_ "github.com/Go-SQL-Driver/MySQL"
 	"io"
-	"log"
 	"os"
 	"strings"
 )
@@ -27,11 +26,11 @@ type connection struct {
 
 // [later:JSON]
 func NewClient(ws *websocket.Conn, server *Server) *connection {
-	log.Println("client constructed")
+	logger.Debug("client constructed")
 	var msg string
 	websocket.Message.Receive(ws, &msg) // get uid & author
 	temp := strings.Split(msg, "+")
-	log.Println(" - author : ", temp[0], " - uid : ", temp[1], " - ")
+	logger.Trace(" - author : ", temp[0], " - uid : ", temp[1], " - ")
 
 	return &connection{
 		author: temp[0],
@@ -51,7 +50,7 @@ func (c *connection) Write(pack *Pack) {
 	case c.send <- pack:
 	default:
 		c.server.Unregister(c)
-		log.Println("client %s is disconnected.", c.uid)
+		logger.Debug("client %s is disconnected.", c.uid)
 	}
 }
 
@@ -60,7 +59,7 @@ func (c *connection) Done() {
 }
 
 func (c *connection) Listen() {
-	log.Println("client listening")
+	logger.Debug("client listening")
 	go c.listenWrite()
 	c.OfflinePush()
 	c.listenRead()
@@ -74,27 +73,27 @@ func (c *connection) OfflinePush() {
 		t    string
 		dt   string
 	)
-	log.Println("offline message push")
+	logger.Debug("offline message push")
 	c.server.openDatabase("offlinepusher")
 	defer func() {
 		c.server.closeDatabase("offlinepusher")
-		log.Println("offline message push to %s over", c.uid)
+		logger.Trace("offline message push to %s over", c.uid)
 	}()
 
 	stmt, err := c.server.db.Prepare("SELECT sUID, time, message, packtype, dsttype FROM offlinemessage WHERE dUID=?")
 	if err != nil {
-		log.Println(err.Error())
+		logger.Error(err.Error())
 	}
 
 	rows, err := stmt.Query(c.uid)
 	if err != nil {
-		log.Println(err.Error())
+		logger.Error(err.Error())
 	}
 
 	for rows.Next() {
 		err = rows.Scan(&suid, &time, &msg, &t, &dt)
 		if err != nil {
-			log.Println(err.Error())
+			logger.Error(err.Error())
 		}
 		at := c.GetName(suid)
 		ad := c.GetName(c.uid)
@@ -117,18 +116,18 @@ func (c *connection) OfflinePush() {
 	c.server.openDatabase("delete")
 	stmt, err = c.server.db.Prepare("DELETE FROM offlinemessage WHERE dUID=?")
 	if err != nil {
-		log.Println(err.Error())
+		logger.Error(err.Error())
 	}
 
 	_, err = stmt.Exec(c.uid)
 	if err != nil {
-		log.Println(err.Error())
+		logger.Error(err.Error())
 	}
 }
 
 func (c *connection) GetName(id string) string {
 	var name string
-	log.Println("get name with uid")
+	logger.Debug("get name with uid")
 	c.server.openDatabase("GetName()")
 	defer func() {
 		c.server.closeDatabase("GetName()")
@@ -136,26 +135,26 @@ func (c *connection) GetName(id string) string {
 
 	stmt, err := c.server.db.Prepare("SELECT username FROM user WHERE uid=?")
 	if err != nil {
-		log.Println(err.Error())
+		logger.Error(err.Error())
 	}
 
 	rows, err := stmt.Query(id)
 	if err != nil {
-		log.Println(err.Error())
+		logger.Error(err.Error())
 	}
 
 	for rows.Next() {
 		err = rows.Scan(&name)
 		if err != nil {
-			log.Println(err.Error())
+			logger.Error(err.Error())
 		}
 	}
-	log.Println("get:", name)
+	logger.Trace("get:", name)
 	return name
 }
 
 func (c *connection) GetUids(t string, whom string) []string {
-	log.Println("get", whom, "'s uid")
+	logger.Trace("get", whom, "'s uid")
 	var (
 		uid  string
 		dUid []string
@@ -171,39 +170,39 @@ func (c *connection) GetUids(t string, whom string) []string {
 	if t == "S" {
 		stmt, err = c.server.db.Prepare("SELECT uid FROM user WHERE username=?")
 		if err != nil {
-			log.Println("Error:", err.Error())
+			logger.Error("Error:", err.Error())
 		}
 		rows, err = stmt.Query(whom)
 		if err != nil {
-			log.Println("Error:", err.Error())
+			logger.Error("Error:", err.Error())
 		}
 	} else if t == "G" {
 		stmt, err = c.server.db.Prepare("SELECT uid FROM ingroup WHERE gid in(SELECT gid FROM game.group WHERE groupname=?)")
 		if err != nil {
-			log.Println("Error:", err.Error())
+			logger.Error("Error:", err.Error())
 		}
 		rows, err = stmt.Query(whom)
 		if err != nil {
-			log.Println("Error:", err.Error())
+			logger.Error("Error:", err.Error())
 		}
 	} else if t == "B" {
 		rows, err = c.server.db.Query("SELECT uid FROM user")
 		if err != nil {
-			log.Println("Error:", err.Error())
+			logger.Error("Error:", err.Error())
 		}
 	} else {
-		log.Println("error destination type")
+		logger.Warn("error destination type")
 		return nil
 	}
 
 	for rows.Next() {
 		err = rows.Scan(&uid)
 		if err != nil {
-			log.Println("Error:", err.Error())
+			logger.Error("Error:", err.Error())
 		}
 		dUid = append(dUid, uid)
 	}
-	log.Println(dUid)
+	logger.Trace(dUid)
 
 	return dUid
 }
@@ -211,31 +210,31 @@ func (c *connection) GetUids(t string, whom string) []string {
 func (c *connection) StoreFile(path string, filename string) {
 	// store file in server side
 	var data []byte
-	log.Println("begin to store file:", path, filename)
+	logger.Trace("begin to store file:", path, filename)
 	err := websocket.Message.Receive(c.ws, &data)
 	if err != nil {
-		log.Println("Error:", err.Error())
+		logger.Error("Error:", err.Error())
 	}
 
 	if len(data) > 50 {
-		log.Println("DEBUG : Receive file data :", string(data[:50]))
+		logger.Debug("Receive file data :", string(data[:50]))
 	} else {
-		log.Println("DEBUG : Receive file data :", string(data))
+		logger.Debug("Receive file data :", string(data))
 	}
 
 	err = os.MkdirAll("./repertory/"+path, 0777)
 	if err != nil {
-		log.Println("Error:", err.Error())
+		logger.Error("Error:", err.Error())
 	}
 
 	f, err := os.Create("./repertory/" + path + "/" + filename) // file name. it should be deleted if exist or add datetime as filename
 	if err != nil {
-		log.Println("Error:", err.Error())
+		logger.Error("Error:", err.Error())
 	}
 	defer func() {
 		err := f.Close()
 		if err != nil {
-			log.Println("Error:", err.Error())
+			logger.Error("Error:", err.Error())
 		}
 	}()
 
@@ -246,14 +245,14 @@ func (c *connection) StoreFile(path string, filename string) {
 		d = data[0:]
 		_, err := f.Write(d)
 		if err != nil {
-			log.Println("Error:", err.Error())
+			logger.Error("Error:", err.Error())
 		}
 	} else {
 		for p < l/4096 {
 			d = data[p*4096 : (p+1)*4096]
 			_, err := f.Write(d)
 			if err != nil {
-				log.Println("Error:", err.Error())
+				logger.Error("Error:", err.Error())
 			}
 			p++
 		}
@@ -261,27 +260,27 @@ func (c *connection) StoreFile(path string, filename string) {
 			d = data[p*4096:]
 			_, err := f.Write(d)
 			if err != nil {
-				log.Println("Error:", err.Error())
+				logger.Error("Error:", err.Error())
 			}
 		}
 	}
-	log.Println("finish storing file")
+	logger.Info("finish storing file")
 }
 
 // this should work by pieces.
 func (c *connection) DownloadFile(path string, pack Pack) {
-	log.Println("begin to download file:", path, pack.Message)
+	logger.Trace("begin to download file:", path, pack.Message)
 
 	f, err := os.Open("./repertory/" + path + "/" + pack.Message)
 	if err != nil {
-		log.Println("Error:", err.Error())
+		logger.Error("Error:", err.Error())
 	}
 	defer func() {
 		err := f.Close()
 		if err != nil {
-			log.Println("Error:", err.Error())
+			logger.Error("Error:", err.Error())
 		}
-		log.Println("download file done")
+		logger.Info("download file done")
 	}()
 
 	buf := make([]byte, 1024)
@@ -290,7 +289,7 @@ func (c *connection) DownloadFile(path string, pack Pack) {
 		n, err := f.Read(buf)
 		if err != nil && err != io.EOF {
 			if err != nil {
-				log.Println("Error:", err.Error())
+				logger.Error("Error:", err.Error())
 			}
 		}
 		if n != 0 {
@@ -306,9 +305,9 @@ func (c *connection) DownloadFile(path string, pack Pack) {
 
 	// observe data encode
 	if len(data) > 50 {
-		log.Println(string(data[:50]))
+		logger.Trace(string(data[:50]))
 	} else {
-		log.Println(string(data))
+		logger.Trace(string(data))
 	}
 
 	fi := &File{
@@ -318,7 +317,7 @@ func (c *connection) DownloadFile(path string, pack Pack) {
 
 	file, err := json.Marshal(fi)
 	if err != nil {
-		log.Println("Error:", err.Error())
+		logger.Error("Error:", err.Error())
 	}
 
 	p := &Pack{
@@ -333,7 +332,7 @@ func (c *connection) DownloadFile(path string, pack Pack) {
 }
 
 func (c *connection) listenRead() { // send to all
-	log.Println("listening read")
+	logger.Debug("listening read")
 	var pack Pack
 	var path string
 	for {
@@ -342,34 +341,34 @@ func (c *connection) listenRead() { // send to all
 		case <-c.doneCh:
 			c.server.Unregister(c)
 			c.Done()
-			log.Println("done from listen read")
+			logger.Debug("done from listen read")
 		default:
 			/*var test string
 			err := websocket.Message.Receive(c.ws, &test)
 			log.Println(test)*/
 			err := websocket.JSON.Receive(c.ws, &pack)
-			log.Println(pack)
+			logger.Trace(pack)
 			if err == io.EOF {
 				c.Done()
-				log.Println("default : done from listen read")
+				logger.Info("default : done from listen read")
 			} else if err != nil {
 				c.server.Err(err)
 			} else {
 				// this will deal one-to-one、one-to-many、broadcast、file
-				log.Println(pack)
+				logger.Trace(pack)
 				dst := c.GetUids(pack.DstT, pack.Addressee)
 				if pack.Type == "FILE" {
 					if c.uid == dst[0] {
 						// 如果收件人和发件人相同，意味着发件人使用邮件领取单领取邮件（这里是下载已上传的文件）
 						// [+] if file upload not done yet
-						log.Println(c.author, "download file:", pack.Message)
+						logger.Trace(c.author, "download file:", pack.Message)
 						sUid := c.GetUids(pack.DstT, pack.Author)
 						path = sUid[0] + "/" + c.uid // get download file's path
 						c.DownloadFile(path, pack)
 						break
 					}
 					path = c.uid + "/" + dst[0]
-					log.Println(c.author, "upload file:", pack.Message)
+					logger.Trace(c.author, "upload file:", pack.Message)
 					c.StoreFile(path, pack.Message)
 				}
 				m := &Pack{
@@ -383,7 +382,7 @@ func (c *connection) listenRead() { // send to all
 					sUid: c.uid,
 					dUid: dst,
 					pack: m}
-				log.Println(p)
+				logger.Trace(p)
 				c.server.Post(p)
 			}
 		}
@@ -391,17 +390,17 @@ func (c *connection) listenRead() { // send to all
 }
 
 func (c *connection) listenWrite() {
-	log.Println("listening write")
+	logger.Debug("listening write")
 	for {
 		select {
 		case message := <-c.send:
-			log.Println(c.author, "send : ", message)
+			logger.Trace(c.author, "send : ", message)
 			websocket.JSON.Send(c.ws, message)
 
 		case <-c.doneCh:
 			c.server.Unregister(c)
 			c.Done()
-			log.Println("done from listen write")
+			logger.Info("done from listen write")
 			return
 		}
 	}

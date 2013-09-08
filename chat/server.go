@@ -4,7 +4,6 @@ import (
 	"code.google.com/p/go.net/websocket"
 	"database/sql"
 	_ "github.com/Go-SQL-Driver/MySQL"
-	"log"
 	"net/http"
 )
 
@@ -101,46 +100,46 @@ func (s *Server) sendAll(pack Pack) {
 }
 
 func (s *Server) openDatabase(who string) {
-	log.Println(who, "open database")
+	logger.Trace(who, "open database")
 	var err error
 	s.db, err = sql.Open("mysql", "root:mrp520@/game")
 	if err != nil {
-		log.Println("Error:", err.Error())
+		logger.Error("Error:", err.Error())
 	}
 }
 
 func (s *Server) closeDatabase(who string) {
-	log.Println(who, "close database")
+	logger.Trace(who, "close database")
 	err := s.db.Close()
 	if err != nil {
-		log.Println("Error:", err.Error())
+		logger.Error("Error:", err.Error())
 	}
 }
 
 func (s *Server) offlineMsgStore(b *Postman, offId []string) {
-	log.Println("store offline message")
+	logger.Info("store offline message")
 	var affect int
 	stmt, err := s.db.Prepare("INSERT offlinemessage SET duid=?, suid=?, time=?, message=?, packtype=?, dsttype=?")
 	if err != nil {
-		log.Println("Error:", err.Error())
+		logger.Error("Error:", err.Error())
 	}
 
 	for _, d := range offId {
 		_, err := stmt.Exec(d, b.sUid, b.pack.DateTime, b.pack.Message, b.pack.Type, b.pack.DstT)
 		if err != nil {
-			log.Println("Error:", err.Error())
+			logger.Error("Error:", err.Error())
 		}
 		affect++
 	}
 
-	log.Println("affect : ", affect)
+	logger.Trace("affect : ", affect)
 }
 
 func (s *Server) Listen() {
-	log.Println("Listening server . . .")
+	logger.Info("Listening server . . .")
 
 	onConnected := func(ws *websocket.Conn) {
-		log.Println("new connect . . .")
+		logger.Info("new connect . . .")
 		defer func() {
 			err := ws.Close()
 			if err != nil {
@@ -153,32 +152,32 @@ func (s *Server) Listen() {
 		client.Listen()
 	}
 	http.Handle(s.pattern, websocket.Handler(onConnected))
-	log.Println("Created handler")
+	logger.Info("Created handler")
 
 	for {
 		select {
 		case c := <-s.register:
 			s.connections[c.uid] = c
-			log.Println("Client Register : ", c.uid)
-			log.Println("Current connection :", s.connections)
+			logger.Trace("Client Register : ", c.uid)
+			logger.Trace("Current connection :", s.connections)
 		case c := <-s.unregister:
-			log.Println("Delete Client : ", c.uid)
+			logger.Trace("Delete Client : ", c.uid)
 			delete(s.connections, c.uid)
 			close(c.send)
 		case bmsg := <-s.broadcast:
-			log.Println("broadcast : ", bmsg)
+			logger.Trace("broadcast : ", bmsg)
 			//s.history = append(s.history, bmsg)
 			s.sendAll(bmsg)
 		case tr := <-s.postman: // Responsible for distributing information(include one-to-one、one-to-many)
-			log.Println("postman :", tr)
+			logger.Trace("postman :", tr)
 			s.openDatabase("Postman")
 			var off []string
-			log.Println("postman check connect:", s.connections)
+			logger.Trace("postman check connect:", s.connections)
 
 			for _, g := range tr.dUid {
 				c := s.connections[g]
 				if c == nil {
-					log.Println(g, "offline . . .")
+					logger.Trace(g, "offline . . .")
 					off = append(off, g)
 					continue
 				}
@@ -191,9 +190,9 @@ func (s *Server) Listen() {
 			}
 			s.closeDatabase("Postman")
 		case err := <-s.errCh: // [bug] this dosen's work well
-			log.Println(err.Error())
+			logger.Error(err.Error())
 		case <-s.doneCh: // when server close
-			log.Println("done")
+			logger.Info("done")
 			return
 		}
 	}
