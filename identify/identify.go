@@ -49,12 +49,14 @@ func Login(ws *websocket.Conn) {
 		err = websocket.JSON.Receive(ws, &login)
 		if err != nil {
 			logger.Error("Error:", err.Error())
+			break
 		}
 		logger.Trace("Receive login message : [ Username:", login.Username, " ]  [ Password:", login.Userpasswd, " ]")
 
 		stmt, err := db.Prepare("select UID, username, userpassword from user where username=? && userpassword=?")
 		if err != nil {
 			logger.Error("Error:", err.Error())
+			break
 		}
 
 		rows, err := stmt.Query(login.Username, login.Userpasswd) // temp contants username and password which split before
