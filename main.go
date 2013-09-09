@@ -9,31 +9,21 @@ import (
 	"code.google.com/p/go.net/websocket"
 	"flag"
 	"fmt"
+	"log"
 	"net/http"
 
-	log "github.com/cihub/seelog"
+	mainlog "github.com/cihub/seelog"
 	"github.com/xsuii/dontsettle/chat"
 	"github.com/xsuii/dontsettle/identify"
 )
 
 func loadLogAppComfig() {
-	logConfig := `
-<seelog type="sync">
-	<outputs formatid="dontsettle">
-		<console />
-		<file path="log/log.log" />
-	</outputs>
-	<formats>
-		<format id="dontsettle" format="donsettle: [%LEV] %Msg%n" />
-	</formats>
-</seelog>
-`
-	logger, err := log.LoggerFromConfigAsBytes([]byte(logConfig))
+	logger, err := mainlog.LoggerFromConfigAsFile("conf/log/color.xml")
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
-	log.ReplaceLogger(logger)
+	mainlog.ReplaceLogger(logger)
 	chat.UseLogger(logger)
 	identify.UseLogger(logger)
 }
@@ -42,10 +32,17 @@ var addr = flag.String("addr", ":8001", "http service address") // default liste
 
 func main() {
 	defer chat.FlushLog()
-	defer log.Flush()
+	defer mainlog.Flush()
 	loadLogAppComfig()
 	flag.Parse()
-	//log.SetFlags(log.Lshortfile) // log begin with file and line number
+	log.SetFlags(log.Lshortfile)
+
+	mainlog.Trace("trace")
+	mainlog.Debug("debug")
+	mainlog.Info("info")
+	mainlog.Warn("warn")
+	mainlog.Error("error")
+	mainlog.Critical("critical")
 
 	server := chat.NewServer("/chat")
 	go server.Listen()
@@ -55,6 +52,6 @@ func main() {
 
 	http.Handle("/", http.FileServer(http.Dir("www"))) // web root
 
-	log.Info("Listening on port", *addr)
-	log.Critical(http.ListenAndServe(*addr, nil)) // run server
+	mainlog.Info("Listening on port", *addr)
+	mainlog.Critical(http.ListenAndServe(*addr, nil)) // run server
 }
