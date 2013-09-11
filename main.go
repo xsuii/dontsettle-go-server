@@ -17,7 +17,7 @@ import (
 	"github.com/xsuii/dontsettle/identify"
 )
 
-func loadLogAppComfig() {
+func loadLogComfig() {
 	logger, err := mainlog.LoggerFromConfigAsFile("conf/log/color.xml")
 	if err != nil {
 		fmt.Println(err)
@@ -33,10 +33,11 @@ var addr = flag.String("addr", ":8001", "http service address") // default liste
 func main() {
 	defer chat.FlushLog()
 	defer mainlog.Flush()
-	loadLogAppComfig()
+	loadLogComfig()
 	flag.Parse()
 	log.SetFlags(log.Lshortfile)
 
+	// seelog debug
 	mainlog.Trace("trace")
 	mainlog.Debug("debug")
 	mainlog.Info("info")
@@ -47,9 +48,11 @@ func main() {
 	server := chat.NewServer("/chat")
 	go server.Listen()
 
+	// www route
 	http.Handle("/login", websocket.Handler(identify.Login))
 	http.Handle("/register", websocket.Handler(identify.Register))
 
+	// server root
 	http.Handle("/", http.FileServer(http.Dir("www"))) // web root
 
 	mainlog.Info("Listening on port", *addr)
