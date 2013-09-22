@@ -1,0 +1,61 @@
+<html>
+<head>
+ 	<title>Manager Login</title>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" type="text/css" href="css/demo.css" />
+    <link rel="stylesheet" type="text/css" href="css/style.css" />
+    <link rel="stylesheet" type="text/css" href="css/animate-custom.css" />
+    <script type="text/javascript" src="lib/jquery-2.0.3.min.js"></script>
+    <script type="text/javascript" src="lib/knockout-2.3.0.min.js"></script>
+    <script type="text/javascript" src="lib/sammy.js"></script>
+</head>
+<body>
+    <div class="container" data-bind="visible: identifyView"> 
+        <!-- Codrops top bar -->
+        <div class="codrops-top">  <strong> Master : </strong>Enjoy yourself
+            <div class="clr"></div>
+        </div>
+        <!--/ Codrops top bar -->
+        <header>
+            <h1>Welcome</h1>
+        </header>
+        <section>
+            <div id="container_demo" > 
+                <div id="wrapper">
+                    <!-- login start -->
+                    <div data-bind="with: loginData">
+                        <div id="login" class="animate form" >
+                            <form autocomplete="on">
+                                <h1>Manager</h1>
+                                <p>
+                                    <label for="username" class="uname" data-icon="u" > Your email or username </label>
+                                    <input id="username" name="username" required type="text" placeholder="myusername or mymail@mail.com" data-bind="value: lUserName" />
+                                </p>
+                                <p>
+                                    <label for="password" class="youpasswd" data-icon="p"> Your password </label>
+                                    <input id="password" name="password" required type="password" placeholder="eg. X8df!90EO" data-bind="value: lUserPassWd" />
+                                </p>
+                                <p class="keeplogin">
+                                    <input type="checkbox" name="loginkeeping" id="loginkeeping" value="loginkeeping" />
+                                    <label for="loginkeeping">Keep me logged in</label>
+                                </p>
+                                <p id="loginError" style="color: #F00" data-bind="text: loginError"></p>
+                                <p class="login button">
+                                    <input type="button" value="Login" data-bind="click: $root.login "/>
+                                </p>
+                                <p class="change_link"> 
+                                    Go to <a href="index.html">Client Login</a> 
+                                </p>
+                            </form>
+                        </div>
+                    </div>
+                    <!-- login end -->
+                </div>
+            </div>
+        </section>
+    </div>
+    <script type="text/javascript" src="js/mg/app.js"></script>
+    <script type="text/javascript" src="js/mg/viewmodel.js"></script>
+    <script type="text/javascript" src="js/mg/router.js"></script>
+</body>
+</html>
