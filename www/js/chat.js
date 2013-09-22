@@ -1,4 +1,8 @@
 // JavaScript Document
+/*
+	no longer use
+*/
+
 window.requestFileSystem = window.requestFileSystem || window.webkitRequestFileSystem;
 var USER = localStorage.username;
 var UID = localStorage.uid;
@@ -136,7 +140,7 @@ function clearHistory() {
 	db.transaction(clearHistoryDB, errorCB);
 }
 
-//////////////////////// WebSocket //////////////////////////////
+//////////////////////////// WebSocket //////////////////////////////
 
 function onWebSocket() {
 	//websocket = new plugins.WebSocket(wsUriTest);

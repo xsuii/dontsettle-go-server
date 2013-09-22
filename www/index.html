@@ -4,48 +4,135 @@
     <meta charset="utf-8" />
     <link rel="stylesheet" type="text/css" href="css/demo.css" />
     <link rel="stylesheet" type="text/css" href="css/style.css" />
+    <link rel="stylesheet" type="text/css" href="css/chat.css"/>
     <link rel="stylesheet" type="text/css" href="css/animate-custom.css" />
-    <script type="text/javascript" src="js/index.js"></script>
+    <script type="text/javascript" src="lib/jquery-2.0.3.min.js"></script>
+    <script type="text/javascript" src="lib/knockout-2.3.0.min.js"></script>
+    <script type="text/javascript" src="lib/sammy.js"></script>
 </head>
 <body>
-<div class="container"> 
-    <!-- Codrops top bar -->
-    <div class="codrops-top">  <strong> Master : </strong>Enjoy yourself
-        <div class="clr"></div>
-    </div>
-    <!--/ Codrops top bar -->
-    <header>
-        <h1>Welcome</h1>
-    </header>
-    <section>
-        <div id="container_demo" > 
-            <div id="wrapper">
-                <div id="login" class="animate form">
-                    <form  action="" autocomplete="on">
-                        <h1>Log in</h1>
-                        <p>
-                            <label for="username" class="uname" data-icon="u" > Your email or username </label>
-                            <input id="username" name="username" required type="text" placeholder="myusername or mymail@mail.com"/>
-                        </p>
-                        <p>
-                            <label for="password" class="youpasswd" data-icon="p"> Your password </label>
-                            <input id="password" name="password" required type="password" placeholder="eg. X8df!90EO" />
-                        </p>
-                        <p class="keeplogin">
-                            <input type="checkbox" name="loginkeeping" id="loginkeeping" value="loginkeeping" />
-                            <label for="loginkeeping">Keep me logged in</label>
-                        </p>
-                        <p id="loginError" style="color: #F00"></p>
-                        <p class="login button">
-                            <input type="button" onclick="sendLogin()" value="Login" />
-                        </p>
-                        <p class="change_link"> Not a member yet ? <a href="register.html">Join us</a> </p>
-                    </form>
+    <div class="container" data-bind="visible: identifyView"> 
+        <!-- Codrops top bar -->
+        <div class="codrops-top">  <strong> Master : </strong>Enjoy yourself
+            <div class="clr"></div>
+        </div>
+        <!--/ Codrops top bar -->
+        <header>
+            <h1>Welcome</h1>
+        </header>
+        <section>
+            <div id="container_demo" > 
+                <div id="wrapper">
+                    <!-- login start -->
+                    <div data-bind="with: loginData">
+                        <div id="login" class="animate form" >
+                            <form autocomplete="on">
+                                <h1>Log in</h1>
+                                <p>
+                                    <label for="username" class="uname" data-icon="u" > Your email or username </label>
+                                    <input id="username" name="username" required type="text" placeholder="myusername or mymail@mail.com" data-bind="value: lUserName" />
+                                </p>
+                                <p>
+                                    <label for="password" class="youpasswd" data-icon="p"> Your password </label>
+                                    <input id="password" name="password" required type="password" placeholder="eg. X8df!90EO" data-bind="value: lUserPassWd" />
+                                </p>
+                                <p class="keeplogin">
+                                    <input type="checkbox" name="loginkeeping" id="loginkeeping" value="loginkeeping" />
+                                    <label for="loginkeeping">Keep me logged in</label>
+                                </p>
+                                <p id="loginError" style="color: #F00" data-bind="text: loginError"></p>
+                                <p class="login button">
+                                    <input type="button" value="Login" data-bind="click: $root.login "/>
+                                </p>
+                                <p class="change_link"> 
+                                    Not a member yet ? <a href="#" data-bind="click: $root.toRegisterView">Join us</a> 
+                                    </br>Login as <a href="manager.html">Manager</a>
+                                </p>
+                            </form>
+                        </div>
+                    </div>
+                    <!-- login end -->
+
+                    <!-- register start -->
+                    <div data-bind="with: registerData">
+                        <div id="register" class="animate form">
+                            <form autocomplete="on">
+                                <h1> Sign up </h1>
+                                <p>
+                                    <label for="usernamesignup" class="uname" data-icon="u">Your username</label>
+                                    <input id="usernamesignup" name="usernamesignup" required type="text" placeholder="mysuperusername690" data-bind="value: rUserName"/>
+                                </p>
+                                <p>
+                                    <label for="emailsignup" class="youmail" data-icon="e" > Your email</label>
+                                    <input id="emailsignup" name="emailsignup" required type="email" placeholder="mysupermail@mail.com" data-bind="value: rEmail"/>
+                                </p>
+                                <p>
+                                    <label for="passwordsignup" class="youpasswd" data-icon="p">Your password </label>
+                                    <input id="passwordsignup" name="passwordsignup" required type="password" placeholder="eg. X8df!90EO" data-bind="value: rUserPassWd"/>
+                                </p>
+                                <p>
+                                    <label for="passwordsignup_confirm" class="youpasswd" data-icon="p">Please confirm your password </label>
+                                    <input id="passwordsignup_confirm" name="passwordsignup_confirm" required type="password" placeholder="eg. X8df!90EO" data-bind="value: rConfirmPassWd"/>
+                                </p>
+                                <p class="signin button">
+                                    <input type="submit" value="Sign up"/>
+                                </p>
+                                <p class="change_link"> Already a member ? <a href="#" data-bind="click: $root.toLoginView"> Go and log in </a> </p>
+                            </form>
+                        </div>
+                    </div>
+                    <!-- register end -->
                 </div>
             </div>
+        </section>
+    </div>
+        <!-- chat start -->
+        <div data-bind="visible: chatView">
+            <div id="userinfo" data-bind="with: userInfo">
+                <p>Author:<span data-bind="text: author"></span></p>
+                <p>UID:<span data-bind="text: uid"></span></p>
+            </div>
+            <div id="messageWrapper">
+                <div id="sendWrapper">
+                    <div id="messageBox" data-bind="foreach: msgBox">
+                        <p>
+                            <span data-bind="text: who"></span> says:
+                            <span data-bind="text: msg"></span>
+                        </p>
+                    </div>
+                    <form id="sendBox" data-bind="with: sendBox">
+                        <input type="button" value="send" data-bind="click: $root.sendMessage " />
+                        <input id="message" data-bind="value: sendMsg"/>
+                        to
+                        <div>
+                            <input placeholder="one" id="one" data-bind="value: toOne"/>
+                            <br/>
+                            <input placeholder="group" id="group" data-bind="value: toGroup"/>
+                        </div> 
+                    </form>
+                </div>
+                <div id="historyWrapper">
+                    <div id="chatHistory" data-bind="foreach: historyBox">
+                        <p>
+                            <span data-bind="text: msg"></span>
+                        </p>
+                    </div>
+                    <p>
+                        <!--<span data-bind="text: warm"></span>-->
+                    </p>
+                    <input type="button" id="history" value="show history" data-bind="click: $root.showHistory"/>
+                    <input type="button" value="clear history" data-bind="click: $root.clearHistory"/>
+                </div>
+                <div id="fileWrapper">
+                    <input type="file" id="file" />
+                    <input type="button" id="send" value="send" data-bind="click: upFile"/>
+                </div>
+            </div>
+            <div id="chatError"></div>
         </div>
-    </section>
-    <div id="output"></div>
-</div>
+        <!-- chat end -->
+    <script type="text/javascript" src="js/app.js"></script>
+    <script type="text/javascript" src="js/viewmodel.js"></script>
+    <script type="text/javascript" src="js/router.js"></script>
 </body>
 </html>

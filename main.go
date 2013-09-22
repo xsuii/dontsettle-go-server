@@ -6,15 +6,13 @@
 package main
 
 import (
-	"code.google.com/p/go.net/websocket"
 	"flag"
 	"fmt"
 	"log"
 	"net/http"
 
 	mainlog "github.com/cihub/seelog"
-	"github.com/xsuii/dontsettle/chat"
-	"github.com/xsuii/dontsettle/identify"
+	"github.com/xsuii/dontsettle/servergo/xserver"
 )
 
 func loadLogComfig() {
@@ -24,14 +22,13 @@ func loadLogComfig() {
 		return
 	}
 	mainlog.ReplaceLogger(logger)
-	chat.UseLogger(logger)
-	identify.UseLogger(logger)
+	xserver.UseLogger(logger)
 }
 
 var addr = flag.String("addr", ":8001", "http service address") // default listening port is 8000
 
 func main() {
-	defer chat.FlushLog()
+	defer xserver.FlushLog()
 	defer mainlog.Flush()
 	loadLogComfig()
 	flag.Parse()
@@ -45,12 +42,12 @@ func main() {
 	mainlog.Error("error")
 	mainlog.Critical("critical")
 
-	server := chat.NewServer("/chat")
+	server := xserver.NewServer("/login", "/mlogin") // "/login" pattern for client, and "/mlogin" pattern for manager
 	go server.Listen()
 
 	// www route
-	http.Handle("/login", websocket.Handler(identify.Login))
-	http.Handle("/register", websocket.Handler(identify.Register))
+	//http.Handle("/login", websocket.Handler(identify.Login))
+	//http.Handle("/register", websocket.Handler(identify.Register))
 
 	// server root
 	http.Handle("/", http.FileServer(http.Dir("www"))) // web root
