@@ -17,13 +17,12 @@ type LoginInfo struct {
 }
 
 type File struct {
-	FileName string
-	Body     string
+	FileName []byte
+	Body     []byte
 }
 
 type connection struct {
-	uid    uint // connection id
-	Sender uint
+	uid    uint64          // connection id
 	ws     *websocket.Conn // connection socket
 	server *Server         // the server was connected
 	send   chan *Pack      // message channel
@@ -52,21 +51,14 @@ func NewClient(ws *websocket.Conn, server *Server) *connection {
 			logger.Error(err.Error())
 			return nil
 		}
-		b := make([]byte, 0)
-		b = strconv.AppendUint(b, id, 10)
-		p := &Pack{
-			Sender:      0,
-			Receiver:    0,
-			Body:        b,
-			DateTime:    time.Now().String(),
-			OpCode:      OpLogin,
-			ForwardType: "",
-		}
+		bid := make([]byte, 0) // convert uint64 to []byte
+		bid = strconv.AppendUint(bid, id, 10)
+		logger.Trace(bid)
+		p := server.pack(MasterId, id, bid, time.Now().Unix(), OpLogin, FwSingle)
 		websocket.JSON.Send(ws, p)
 		if id > 0 {
 			return &connection{
-				Sender: login.Username,
-				uid:    sId,
+				uid:    id,
 				ws:     ws,
 				server: server,
 				send:   make(chan *Pack),
@@ -81,7 +73,6 @@ func (c *connection) listenRead() { // send to all
 	for {
 		var pack Pack
 		select {
-
 		case <-c.doneCh:
 			c.server.Unregister(c)
 			c.Done()
@@ -103,25 +94,24 @@ func (c *connection) listenRead() { // send to all
 				logger.Debug("check pack's validable")
 				if !c.server.validPack(pack) {
 					logger.Warn("Bad package!")
-					c.server.masterPack(c, "Back package!")
+					c.server.masterPack(c, []byte("Back package!"))
 					break
 				}
-				dst := c.GetUids(pack.ForwardType, pack.Receiver)
+				recv := c.GetUids(pack.ForwardType, pack.Receiver)
 				if pack.OpCode == OpFileTransfer {
-					if c.uid == dst[0] {
+					if c.uid == recv[0] {
 						// 如果收件人和发件人相同，意味着发件人使用邮件领取单领取邮件（这里是下载已上传的文件）
 						// [+] if file upload not done yet
-						logger.Trace(c.Sender, "download file:", pack.Body)
-						sUid := c.GetUids(pack.ForwardType, pack.Sender)
-						path = sUid[0] + "/" + c.uid // get download file's path
+						logger.Trace(c.uid, "download file:", pack.Body)
+						path = getFilePath(pack.Sender, c.uid) // get download file's path]
 						err := c.DownloadFile(path, pack)
 						if err != nil {
 							logger.Error(err.Error())
 						}
 						break
 					} else {
-						path = c.uid + "/" + dst[0]
-						logger.Trace(c.Sender, "upload file:", pack.Body)
+						logger.Trace(c.uid, "upload file:", pack.Body)
+						path = getFilePath(c.uid, recv[0])
 						err := c.StoreFile(path, pack.Body)
 						if err != nil {
 							logger.Error(err)
@@ -129,17 +119,17 @@ func (c *connection) listenRead() { // send to all
 					}
 				}
 				logger.Debug("Pack package!")
-				m := &Pack{
-					Sender:      c.Sender,
-					Receiver:    pack.Receiver,
-					Body:        pack.Body,
-					DateTime:    pack.DateTime,
-					OpCode:      pack.OpCode,
-					ForwardType: pack.ForwardType}
+				/*m := &Pack{
+				Sender:      pack.Sender,
+				Receiver:    pack.Receiver,
+				Body:        pack.Body,
+				TimeStamp:   pack.TimeStamp,
+				OpCode:      pack.OpCode,
+				ForwardType: pack.ForwardType}*/
 				p := &Postman{
 					sUid: c.uid,
-					dUid: dst,
-					pack: m}
+					dUid: recv,
+					pack: &pack}
 				logger.Trace(p)
 				c.server.Post(p)
 			}
@@ -192,11 +182,11 @@ func (c *connection) Done() {
 
 func (c *connection) OfflinePush() {
 	var (
-		suid  string
-		msg   string
-		time  string
-		t     int
-		dt    string
+		suid  uint64
+		msg   []byte
+		time  int64
+		t     byte
+		dt    byte
 		count int
 	)
 	logger.Debug("offline message push")
@@ -222,19 +212,17 @@ func (c *connection) OfflinePush() {
 		if err != nil {
 			logger.Error(err.Error())
 		}
-		at := c.GetName(suid)
-		ad := c.GetName(c.uid)
 		m := &Pack{
-			Sender:      at,
-			Receiver:    ad,
+			Sender:      suid,
+			Receiver:    c.uid,
 			Body:        msg,
-			DateTime:    time,
+			TimeStamp:   time,
 			OpCode:      t,
 			ForwardType: dt,
 		}
 		p := &Postman{
 			sUid: suid,
-			dUid: []string{c.uid},
+			dUid: []uint64{c.uid},
 			pack: m,
 		}
 		c.server.Post(p)
@@ -280,11 +268,11 @@ func (c *connection) GetName(id string) string {
 	return name
 }
 
-func (c *connection) GetUids(t string, whom uint) []string {
-	logger.Trace("get", whom, "'s uid")
+func (c *connection) GetUids(fwt byte, rid uint64) []uint64 {
+	logger.Trace("get", rid, "'s uid")
 	var (
-		uid  string
-		dUid []string
+		uid  uint64
+		dUid []uint64
 		stmt *sql.Stmt
 		rows *sql.Rows
 		err  error
@@ -294,30 +282,59 @@ func (c *connection) GetUids(t string, whom uint) []string {
 		c.server.closeDatabase("GetUids()")
 	}()
 
-	if t == "S" {
+	/*if fwt == FwSingle {
 		stmt, err = c.server.db.Prepare("SELECT uid FROM user WHERE username=?")
 		if err != nil {
 			logger.Error("Error:", err.Error())
 		}
-		rows, err = stmt.Query(whom)
+		rows, err = stmt.Query(rid)
 		if err != nil {
 			logger.Error("Error:", err.Error())
 		}
-	} else if t == "G" {
+	} else if fwt == FwGroup {
 		stmt, err = c.server.db.Prepare("SELECT uid FROM ingroup WHERE gid in(SELECT gid FROM game.group WHERE groupname=?)")
 		if err != nil {
 			logger.Error("Error:", err.Error())
 		}
-		rows, err = stmt.Query(whom)
+		rows, err = stmt.Query(rid)
 		if err != nil {
 			logger.Error("Error:", err.Error())
 		}
-	} else if t == "B" {
+	} else if fwt == FwBroadcast {
 		rows, err = c.server.db.Query("SELECT uid FROM user")
 		if err != nil {
 			logger.Error("Error:", err.Error())
 		}
 	} else {
+		logger.Warn("error destination type")
+		return nil
+	}*/
+
+	switch fwt {
+	case FwSingle:
+		stmt, err = c.server.db.Prepare("SELECT uid FROM user WHERE uid=?")
+		if err != nil {
+			logger.Error("Error:", err.Error())
+		}
+		rows, err = stmt.Query(rid)
+		if err != nil {
+			logger.Error("Error:", err.Error())
+		}
+	case FwGroup:
+		stmt, err = c.server.db.Prepare("SELECT uid FROM ingroup WHERE gid in(SELECT gid FROM game.group WHERE gid=?)")
+		if err != nil {
+			logger.Error("Error:", err.Error())
+		}
+		rows, err = stmt.Query(rid)
+		if err != nil {
+			logger.Error("Error:", err.Error())
+		}
+	case FwBroadcast:
+		rows, err = c.server.db.Query("SELECT uid FROM user")
+		if err != nil {
+			logger.Error("Error:", err.Error())
+		}
+	default:
 		logger.Warn("error destination type")
 		return nil
 	}
@@ -332,6 +349,10 @@ func (c *connection) GetUids(t string, whom uint) []string {
 	logger.Trace(dUid)
 
 	return dUid
+}
+
+func getFilePath(id1 uint64, id2 uint64) string {
+	return idToString(id1) + "/" + idToString(id2)
 }
 
 func (c *connection) StoreFile(path string, filename []byte) error {
@@ -355,7 +376,7 @@ func (c *connection) StoreFile(path string, filename []byte) error {
 		return err
 	}
 
-	f, err := os.Create("./repertory/" + path + "/" + string(filename)) // file name. it should be deleted if exist or add datetime as filename
+	f, err := os.Create("./repertory/" + path + "/" + string(filename)) // file name. it should be deleted if exist or add TimeStamp as filename
 	if err != nil {
 		return err
 	}
@@ -400,7 +421,7 @@ func (c *connection) StoreFile(path string, filename []byte) error {
 func (c *connection) DownloadFile(path string, pack Pack) error {
 	logger.Trace("begin to download file:", path, pack.Body)
 
-	f, err := os.Open("./repertory/" + path + "/" + pack.Body)
+	f, err := os.Open("./repertory/" + path + "/" + string(pack.Body))
 	if err != nil {
 		return err
 	}
@@ -441,7 +462,7 @@ func (c *connection) DownloadFile(path string, pack Pack) error {
 
 	fi := &File{
 		FileName: pack.Body,
-		Body:     string(data),
+		Body:     data,
 	}
 
 	file, err := json.Marshal(fi)
@@ -450,10 +471,10 @@ func (c *connection) DownloadFile(path string, pack Pack) error {
 	}
 
 	p := &Pack{
-		Sender:      "MASTER",
-		Receiver:    c.Sender,
-		Body:        string(file),
-		DateTime:    pack.DateTime,
+		Sender:      MasterId,
+		Receiver:    c.uid,
+		Body:        file,
+		TimeStamp:   pack.TimeStamp,
 		OpCode:      pack.OpCode,
 		ForwardType: pack.ForwardType,
 	}

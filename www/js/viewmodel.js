@@ -53,24 +53,19 @@ function gameViewModel() {
 
     self.sendMessage = function(msg) {
         console.log("send message", msg);
-        var t = new Date();
-        var pack = {
-            "Sender": localStorage.username,
-            "DateTime": t.toUTCString(),
-            "OpCode": OpChat,
-            "Body": msg.sendMsg,
-        };
         if (msg.toOne != "") {
-            pack["DstT"] = "S";
-            pack["Receiver"] = msg.toOne;
+            fwt = FwSingle;
+            rc = msg.toOne;
         } else if (msg.toGroup != "") {
-            pack["DstT"] = "G";
-            pack["Receiver"] = msg.toGroup;
+            fwt = FwGroup;
+            rc = msg.toGroup;
         } else {
-            pack["DstT"] = "B";
-            pack["Receiver"] = "broadcast";
+            fwt = FwBroadcast;
+            rc = BroadCastId;
         }
-        doSend(JSON.stringify(pack));
+        var p = new Pack(Number(localStorage.uid), rc, msg.sendMsg, OpChat, fwt);
+        console.log(p);
+        p.send();
     };
 
     self.addChats = function(chat) {

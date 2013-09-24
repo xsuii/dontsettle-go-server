@@ -6,42 +6,44 @@ import (
 	_ "github.com/Go-SQL-Driver/MySQL"
 	"html/template"
 	"net/http"
+	"time"
 )
 
 // operation code
 const (
-	OpMaster       = 0 // this present master's message, include bad-package...
-	OpLogin        = 1
-	OpRegister     = 2
-	OpChat         = 3
-	OpFileTransfer = 4
+	OpNull         = 0
+	OpMaster       = 1 // this present master's message, include bad-package...
+	OpLogin        = 2
+	OpRegister     = 3
+	OpChat         = 4
+	OpFileTransfer = 5
+
+	// system id
+	NullId      = 0
+	MasterId    = 10000
+	BroadCastId = 10001
+
+	// ForwardType
+	FwGroup     = 1
+	FwSingle    = 2
+	FwBroadcast = 3
 )
 
-// system id
-const (
-	Master = 10000
-)
-
-// ForwardType
-const (
-	Group     = 1
-	Single    = 2
-	Broadcast = 3
-)
+type IdType uint64 // use this way to achieve easy-extension
 
 type Pack struct {
 	Sender      uint64 // sender's id
 	Receiver    uint64
 	Body        []byte // filename when Type=file
-	DateTime    string
+	TimeStamp   int64
 	OpCode      byte //
 	ForwardType byte // could be group, single, broadcast define in const
 }
 
 // for one-to-one chat  [later:this can merge with group struct]
 type Postman struct {
-	sUid uint
-	dUid []int
+	sUid uint64
+	dUid []uint64
 	pack *Pack
 }
 
@@ -53,7 +55,7 @@ type Server struct {
 	clientPattern  string
 	managerPattern string
 	history        []Pack
-	connections    map[string]*connection // Registered connections
+	connections    map[uint64]*connection // Registered connections
 	register       chan *connection
 	unregister     chan *connection
 	broadcast      chan Pack
@@ -65,7 +67,7 @@ type Server struct {
 
 func NewServer(cPattern string, mPattern string) *Server {
 	history := []Pack{}
-	connections := make(map[string]*connection)
+	connections := make(map[uint64]*connection)
 	register := make(chan *connection)
 	unregister := make(chan *connection)
 	broadcast := make(chan Pack)
@@ -89,9 +91,9 @@ func NewServer(cPattern string, mPattern string) *Server {
 	}
 }
 
-func (s *Server) checkLogin(username string, userpasswd string) (uint, error) {
+func (s *Server) checkLogin(username string, userpasswd string) (uint64, error) {
 	var effect int
-	var uid uint
+	var uid uint64
 
 	s.openDatabase("Func_checkLogin():")
 	defer func() {
@@ -146,7 +148,7 @@ func (s *Server) closeDatabase(who string) {
 	}
 }
 
-func (s *Server) offlineMsgStore(b *Postman, offId []string) {
+func (s *Server) offlineMsgStore(b *Postman, offId []uint64) {
 	logger.Info("store offline message")
 	var affect int
 	stmt, err := s.db.Prepare("INSERT offlinemessage SET duid=?, suid=?, time=?, message=?, packtype=?, dsttype=?")
@@ -155,7 +157,7 @@ func (s *Server) offlineMsgStore(b *Postman, offId []string) {
 	}
 
 	for _, d := range offId {
-		_, err := stmt.Exec(d, b.sUid, b.pack.DateTime, b.pack.Body, b.pack.OpCode, b.pack.ForwardType)
+		_, err := stmt.Exec(d, b.sUid, b.pack.TimeStamp, b.pack.Body, b.pack.OpCode, b.pack.ForwardType)
 		if err != nil {
 			logger.Error("Error:", err.Error())
 		}
@@ -252,7 +254,7 @@ func (s *Server) Listen() {
 		case tr := <-s.postman: // Responsible for distributing information(include one-to-one、one-to-many)
 			logger.Trace("postman :", tr)
 			s.openDatabase("Postman")
-			var off []string
+			var off []uint64
 			logger.Trace("postman check connect:", s.connections)
 
 			for _, g := range tr.dUid {
@@ -279,31 +281,46 @@ func (s *Server) Listen() {
 	}
 }
 
+func (s *Server) pack(sender uint64, receiver uint64, body []byte, timestamp int64, opcode byte, forwardtype byte) Pack {
+	return Pack{
+		Sender:      sender,
+		Receiver:    receiver,
+		Body:        body,
+		TimeStamp:   timestamp,
+		OpCode:      opcode,
+		ForwardType: forwardtype,
+	}
+}
+
 // showing a pack
 func (s *Server) showPack(who string, act string, p Pack) {
 	logger.Tracef("\n%s %s package:"+
-		"\n%-10s%-10s%-30s%-5s%-7s%s"+
-		"\n%-10v%-10v%-30v%-5v%-7v%v",
+		"\n%-20s%-20s%-20s%-15s%-7s%s"+
+		"\n%-20v%-20v%-20v%-15v%-7v%v",
 		who, act,
-		"Sender", "Receiver", "DateTime", "ForwardType", "OpCode", "Body",
-		p.Sender, p.Receiver, p.DateTime, p.ForwardType, p.OpCode, p.Body)
+		"Sender", "Receiver", "TimeStamp", "ForwardType", "OpCode", "Body",
+		p.Sender, p.Receiver, p.TimeStamp, p.ForwardType, p.OpCode, p.Body)
 }
 
 // check the validity of package
 func (s *Server) validPack(p Pack) bool {
-	return p.Receiver != "" && p.Sender != "" && p.Body != "" && p.DateTime != "" && p.ForwardType != "" && p.OpCode != 0
+	return p.Receiver != NullId && p.Sender != NullId && p.Body != nil && p.TimeStamp != 0 && p.ForwardType != ' ' && p.OpCode != OpNull
 }
 
 // server's feedback message where a client's wrong request or action
-func (s *Server) masterPack(c *connection, body string) {
+func (s *Server) masterPack(c *connection, body []byte) {
 	p := &Pack{
-		Sender:      "Master",
-		Receiver:    "",
+		Sender:      MasterId,
+		Receiver:    c.uid,
 		Body:        body,
-		DateTime:    "MasterTime",
+		TimeStamp:   s.getTimeStamp(),
 		OpCode:      OpMaster,
-		ForwardType: "S"}
+		ForwardType: FwSingle}
 	websocket.JSON.Send(c.ws, p)
+}
+
+func (s *Server) getTimeStamp() int64 {
+	return time.Now().Unix()
 }
 
 // add client

@@ -2,13 +2,20 @@
 window.requestFileSystem = window.requestFileSystem || window.webkitRequestFileSystem;
 
 // app opcode
-var OpMaster = 0
-var OpLogin = 1
-var OpRegister = 2
-var OpChat = 3
-var OpFileTransfer = 4
-
-var MASTER = 10000  // app server's system id, it may be good to reserve some id
+var OpNull = 0
+var OpMaster = 1 // this present master's message, include bad-package...
+var OpLogin = 2
+var OpRegister = 3
+var OpChat = 4
+var OpFileTransfer = 5
+// special id
+var NullId = 0
+var MasterId = 10000 // app server's system id, it may be good to reserve some id
+var BroadCastId = 10001
+// forward type
+var FwGroup = 1
+var FwSingle = 2
+var FwBroadcast = 3
 
 var fs = null;
 var wsuri = "ws://xsuii.meibu.net:8001/login";
@@ -76,12 +83,83 @@ function upFile() {
 			"Body": fName,
 			"DateTime": t.toUTCString(),
 			"OpCode": OpFileTransfer,
-			"DstT": "S"
+			"ForwardType": "S"
 		}));
 		console.log(bytes.target.result.toString());
 		doSend(bytes.target.result);
 	};
 	reader.readAsArrayBuffer(f.files[0]);
+}
+
+function addFileNode(file) {
+	var para = document.getElementById("messageBox");
+	var pre = document.createElement("p");
+	pre.innerHTML = "[" + file.ForwardType + "]" + file.Sender + ":" + file.Body;
+	console.log("add file node")
+	pre.style.fontStyle = "italic"; // file node
+	pre.style.fontWeight = "bolder";
+	pre.style.color = "#FF0087";
+	pre.style.backgroundColor = "#D5D5D5"
+	pre.style.padding = "5px";
+	pre.setAttribute("Sender", file.Sender);
+	pre.setAttribute("Receiver", file.Receiver);
+	pre.setAttribute("filename", file.Body);
+	pre.setAttribute("datetime", file.DateTime);
+	pre.setAttribute("opcode", file.OpCode);
+	pre.setAttribute("forwardtype", file.ForwardType);
+	pre.onclick = function() { // send download file request
+		console.log(this.getAttribute("filename"));
+		var r = confirm("sure download?  " + this.getAttribute("filename"));
+		if (r == true) {
+			/*p = {
+				"Sender": this.getAttribute("Sender"),
+				"Receiver": this.getAttribute("Receiver"),
+				"Body": this.getAttribute("filename"),
+				"DateTime": this.getAttribute("dateTime"),
+				"OpCode": parseInt(this.getAttribute("opcode")),
+				"ForwardType": this.getAttribute("forwardtype")
+			};*/
+			doSend(JSON.stringify(p))
+			var p = new Pack(this.getAttribute("Sender"),
+				this.getAttribute("Receiver"),
+				this.getAttribute("filename"),
+				this.getAttribute("dateTime"),
+				parseInt(this.getAttribute("opcode")),
+				this.getAttribute("forwardtype"));
+			p.send();
+		} else {
+			return;
+		}
+	}
+	para.appendChild(pre);
+	keepScrollButtom(para);
+
+	db.transaction(addHistory, errorCB, successCB);
+}
+
+function recieveFile(msg) {
+	file = UnPack(msg.Body);
+	console.log(fs, "begin to recieve file", file.FileName);
+	fs.root.getFile(file.FileName, {
+		create: true
+	}, function(fileEntry) {
+		fileEntry.createWriter(function(fileWriter) {
+			console.log("file_writer_test_s");
+			fileWriter.onwriteend = function(e) {
+				console.log("get file done");
+			};
+
+			fileWriter.onerror = function(e) {
+				console.log("write error");
+			};
+
+			var blob = new Blob([file.Body], {
+				type: "text/plain"
+			});
+			fileWriter.write(blob);
+		}, errorFile);
+	}, errorFile);
+	console.log("file_writer_test_e");
 }
 
 ////////////////////// database operate  ///////////////////////
@@ -143,7 +221,7 @@ function dropHistory() {
 ///////////////////////////// websocket ///////////////////////////
 
 function onWebSocket() {
-	websocket = new WebSocket(wsbk);
+	websocket = new WebSocket(wsuri);
 	console.log(websocket)
 	websocket.onopen = function(evt) {
 		console.log("CONNECTED")
@@ -164,10 +242,12 @@ function onWebSocket() {
 }
 
 function onMessage(evt) {
+	console.log("onmessage:", evt)
+	console.log("typeof data:", typeof(evt.data));
 	console.log("RESPONSE: " + evt.data);
-	msg = JSON.parse(evt.data)
+	msg = UnPack(evt.data);
+	console.log(msg);
 	console.log("OpCode:" + msg.OpCode);
-	console.log("check body type:", typeof(msg.Body));
 	switch (msg.OpCode) {
 		case OpMaster:
 			console.log(msg);
@@ -176,7 +256,7 @@ function onMessage(evt) {
 			if (msg.Body != "0") {
 				console.log("login success with uid :", msg.Body);
 				// initial user data
-				localStorage.uid = msg.Body;
+				localStorage.uid = parseInt(msg.Body);
 				tbName = "h" + msg.Body; // database table name begins with "h"(history)
 				gameModel.toChatView();
 			} else {
@@ -191,68 +271,11 @@ function onMessage(evt) {
 			db.transaction(addHistory, errorCB, successCB);
 			break;
 		case OpFileTransfer:
-			var para = document.getElementById("messageBox");
-			var pre = document.createElement("p");
-			pre.innerHTML = "[" + msg.DstT + "]" + msg.Sender + ":" + msg.Body;
-			if (msg.Sender != "MASTER") {
-				console.log("add file node")
-				pre.style.fontStyle = "italic"; // file node
-				pre.style.fontWeight = "bolder";
-				pre.style.color = "#FF0087";
-				pre.style.backgroundColor = "#D5D5D5"
-				pre.style.padding = "5px";
-				pre.setAttribute("Sender", msg.Sender);
-				pre.setAttribute("Receiver", msg.Receiver);
-				pre.setAttribute("filename", msg.Body);
-				pre.setAttribute("datetime", msg.DateTime);
-				pre.setAttribute("opcode", msg.OpCode);
-				pre.setAttribute("dstt", msg.DstT);
-				pre.onclick = function() { // send download file request
-					console.log(this.getAttribute("filename"));
-					var r = confirm("sure download?  " + this.getAttribute("filename"));
-					if (r == true) {
-						p = {
-							"Sender": this.getAttribute("Sender"),
-							"Receiver": this.getAttribute("Receiver"),
-							"Body": this.getAttribute("filename"),
-							"DateTime": this.getAttribute("dateTime"),
-							"OpCode": parseInt(this.getAttribute("opcode")),
-							"DstT": this.getAttribute("dstt")
-						};
-						doSend(JSON.stringify(p))
-					} else {
-						return;
-					}
-				}
-			} else if (msg.Sender == "MASTER") { // recieve file
-				file = JSON.parse(msg.Body);
-				console.log(fs, "begin to recieve file", file.FileName);
-				fs.root.getFile(file.FileName, {
-					create: true
-				}, function(fileEntry) {
-					fileEntry.createWriter(function(fileWriter) {
-						console.log("file_writer_test_s");
-						fileWriter.onwriteend = function(e) {
-							console.log("get file done");
-						};
-
-						fileWriter.onerror = function(e) {
-							console.log("write error");
-						};
-
-						var blob = new Blob([file.Body], {
-							type: "text/plain"
-						});
-						fileWriter.write(blob);
-					}, errorFile);
-				}, errorFile);
-				console.log("file_writer_test_e");
-				return;
+			if (msg.Sender != MasterId) {
+				addFileNode(msg)
+			} else if (msg.Sender == MasterId) { // recieve file
+				recieveFile(msg)
 			}
-			para.appendChild(pre);
-			keepScrollButtom(para);
-
-			db.transaction(addHistory, errorCB, successCB);
 			break;
 	}
 	// if login success, recieve string "0"; otherwise recieve "uid+username" which will store later
@@ -263,6 +286,36 @@ function onMessage(evt) {
 function doSend(message) {
 	console.log("SENT: " + message);
 	websocket.send(message);
+}
+
+// pack message(Object)
+
+function Pack(sender, reciever, body, opcode, forwardtype) {
+	self = this;
+	self.Sender = sender;
+	self.Receiver = reciever;
+	self.Body = window.btoa(body);
+	self.TimeStamp = Math.round(Date.now() / 1000); // Unix timestamp
+	self.OpCode = opcode;
+	self.ForwardType = forwardtype;
+
+	self.send = function() {
+		console.log("send package");
+		doSend(JSON.stringify({
+			"Sender": self.Sender,
+			"Receiver": self.Receiver,
+			"Body": self.Body,
+			"TimeStamp": self.TimeStamp,
+			"OpCode": self.OpCode,
+			"ForwardType": self.ForwardType,
+		}));
+	}
+}
+
+function UnPack(pack) {
+	var p = JSON.parse(pack);
+	p.Body = window.atob(p.Body); // base64 decode(should consider client-end surport)
+	return p
 }
 
 function loginError(err) {
