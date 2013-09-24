@@ -35,12 +35,14 @@ func main() {
 	log.SetFlags(log.Lshortfile)
 
 	// seelog debug
+	mainlog.Info("--------------- color test ---------------")
 	mainlog.Trace("trace")
 	mainlog.Debug("debug")
 	mainlog.Info("info")
 	mainlog.Warn("warn")
 	mainlog.Error("error")
 	mainlog.Critical("critical")
+	mainlog.Info("------------------------------------------")
 
 	server := xserver.NewServer("/login", "/mlogin") // "/login" pattern for client, and "/mlogin" pattern for manager
 	go server.Listen()
