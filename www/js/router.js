@@ -2,7 +2,6 @@
     A router using sammyjs for browser's anchor registering.
 */
 var currentView = gameModel.identifyView;
-console.log("currentView", currentView());
 
 Sammy(function() {
     this.get('#login', function() {

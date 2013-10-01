@@ -42,9 +42,9 @@ type Pack struct {
 
 // for one-to-one chat  [later:this can merge with group struct]
 type Postman struct {
-	sUid uint64
-	dUid []uint64
-	pack *Pack
+	sUid  uint64
+	dUids []uint64
+	pack  *Pack
 }
 
 type ServerState struct {
@@ -151,15 +151,17 @@ func (s *Server) closeDatabase(who string) {
 func (s *Server) offlineMsgStore(b *Postman, offId []uint64) {
 	logger.Info("store offline message")
 	var affect int
-	stmt, err := s.db.Prepare("INSERT offlinemessage SET duid=?, suid=?, time=?, message=?, packtype=?, dsttype=?")
+	stmt, err := s.db.Prepare("INSERT offlinemessage SET Receiver=?, Sender=?, TimeStamp=?, Body=?, OpCode=?, ForwardType=?")
 	if err != nil {
 		logger.Error("Error:", err.Error())
+		return
 	}
 
 	for _, d := range offId {
 		_, err := stmt.Exec(d, b.sUid, b.pack.TimeStamp, b.pack.Body, b.pack.OpCode, b.pack.ForwardType)
 		if err != nil {
 			logger.Error("Error:", err.Error())
+			return
 		}
 		affect++
 	}
@@ -229,6 +231,57 @@ func (s *Server) serverState() {
 	http.HandleFunc("/state", state)
 }
 
+func (s *Server) pack(sender uint64, receiver uint64, body []byte, timestamp int64, opcode byte, forwardtype byte) Pack {
+	return Pack{
+		Sender:      sender,
+		Receiver:    receiver,
+		Body:        body,
+		TimeStamp:   timestamp,
+		OpCode:      opcode,
+		ForwardType: forwardtype,
+	}
+}
+
+func NewPostman(suid uint64, duids []uint64, pack *Pack) Postman {
+	return Postman{
+		sUid:  suid,
+		dUids: duids,
+		pack:  pack,
+	}
+}
+
+// showing a pack
+func (s *Server) showPack(who string, act string, p Pack) {
+	logger.Tracef("\n%s %s package:"+
+		"\n%-20s%-20s%-20s%-15s%-7s%s"+
+		"\n%-20v%-20v%-20v%-15v%-7v%v",
+		who, act,
+		"Sender", "Receiver", "TimeStamp", "ForwardType", "OpCode", "Body",
+		p.Sender, p.Receiver, p.TimeStamp, p.ForwardType, p.OpCode, p.Body)
+}
+
+// check the validity of package
+func (s *Server) validPack(p Pack) bool {
+	return p.Receiver != NullId &&
+		p.Sender != NullId &&
+		p.Body != nil &&
+		p.TimeStamp != 0 &&
+		p.ForwardType != ' ' &&
+		p.OpCode != OpNull
+}
+
+// server's feedback message where a client's wrong request or action
+func (s *Server) masterPack(c *connection, body []byte) {
+	p := &Pack{
+		Sender:      MasterId,
+		Receiver:    c.uid,
+		Body:        body,
+		TimeStamp:   s.getTimeStamp(),
+		OpCode:      OpMaster,
+		ForwardType: FwSingle}
+	websocket.JSON.Send(c.ws, p)
+}
+
 func (s *Server) Listen() {
 	logger.Info("Listening server . . .")
 
@@ -257,7 +310,7 @@ func (s *Server) Listen() {
 			var off []uint64
 			logger.Trace("postman check connect:", s.connections)
 
-			for _, g := range tr.dUid {
+			for _, g := range tr.dUids {
 				c := s.connections[g]
 				if c == nil {
 					logger.Trace(g, "offline . . .")
@@ -279,44 +332,6 @@ func (s *Server) Listen() {
 			return
 		}
 	}
-}
-
-func (s *Server) pack(sender uint64, receiver uint64, body []byte, timestamp int64, opcode byte, forwardtype byte) Pack {
-	return Pack{
-		Sender:      sender,
-		Receiver:    receiver,
-		Body:        body,
-		TimeStamp:   timestamp,
-		OpCode:      opcode,
-		ForwardType: forwardtype,
-	}
-}
-
-// showing a pack
-func (s *Server) showPack(who string, act string, p Pack) {
-	logger.Tracef("\n%s %s package:"+
-		"\n%-20s%-20s%-20s%-15s%-7s%s"+
-		"\n%-20v%-20v%-20v%-15v%-7v%v",
-		who, act,
-		"Sender", "Receiver", "TimeStamp", "ForwardType", "OpCode", "Body",
-		p.Sender, p.Receiver, p.TimeStamp, p.ForwardType, p.OpCode, p.Body)
-}
-
-// check the validity of package
-func (s *Server) validPack(p Pack) bool {
-	return p.Receiver != NullId && p.Sender != NullId && p.Body != nil && p.TimeStamp != 0 && p.ForwardType != ' ' && p.OpCode != OpNull
-}
-
-// server's feedback message where a client's wrong request or action
-func (s *Server) masterPack(c *connection, body []byte) {
-	p := &Pack{
-		Sender:      MasterId,
-		Receiver:    c.uid,
-		Body:        body,
-		TimeStamp:   s.getTimeStamp(),
-		OpCode:      OpMaster,
-		ForwardType: FwSingle}
-	websocket.JSON.Send(c.ws, p)
 }
 
 func (s *Server) getTimeStamp() int64 {

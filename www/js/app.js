@@ -77,14 +77,8 @@ function upFile() {
 	reader.onloadend = function(bytes) {
 		fName = f.value.substring(f.value.lastIndexOf('\\') + 1);
 		console.log("send file:", fName);
-		doSend(JSON.stringify({
-			"Sender": localStorage.username,
-			"Receiver": sendTo,
-			"Body": fName,
-			"DateTime": t.toUTCString(),
-			"OpCode": OpFileTransfer,
-			"ForwardType": "S"
-		}));
+		var p = new Pack(localStorage.uid, sendTo, fName, OpFileTransfer, FwSingle)
+		p.send();
 		console.log(bytes.target.result.toString());
 		doSend(bytes.target.result);
 	};
@@ -118,8 +112,8 @@ function addFileNode(file) {
 				"DateTime": this.getAttribute("dateTime"),
 				"OpCode": parseInt(this.getAttribute("opcode")),
 				"ForwardType": this.getAttribute("forwardtype")
-			};*/
-			doSend(JSON.stringify(p))
+			};
+			doSend(JSON.stringify(p))*/
 			var p = new Pack(this.getAttribute("Sender"),
 				this.getAttribute("Receiver"),
 				this.getAttribute("filename"),
@@ -242,12 +236,11 @@ function onWebSocket() {
 }
 
 function onMessage(evt) {
-	console.log("onmessage:", evt)
-	console.log("typeof data:", typeof(evt.data));
+	console.log("OnMessage:", evt)
 	console.log("RESPONSE: " + evt.data);
 	msg = UnPack(evt.data);
-	console.log(msg);
-	console.log("OpCode:" + msg.OpCode);
+	console.log("after unpack :", msg);
+	console.log("OpCode :" + msg.OpCode);
 	switch (msg.OpCode) {
 		case OpMaster:
 			console.log(msg);
@@ -267,7 +260,7 @@ function onMessage(evt) {
 		case OpRegister:
 			break;
 		case OpChat:
-			gameModel.addChats(msg);
+			gameModel.addChats(msg); // show to scroll
 			db.transaction(addHistory, errorCB, successCB);
 			break;
 		case OpFileTransfer:

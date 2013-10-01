@@ -53,7 +53,6 @@ func NewClient(ws *websocket.Conn, server *Server) *connection {
 		}
 		bid := make([]byte, 0) // convert uint64 to []byte
 		bid = strconv.AppendUint(bid, id, 10)
-		logger.Trace(bid)
 		p := server.pack(MasterId, id, bid, time.Now().Unix(), OpLogin, FwSingle)
 		websocket.JSON.Send(ws, p)
 		if id > 0 {
@@ -97,7 +96,11 @@ func (c *connection) listenRead() { // send to all
 					c.server.masterPack(c, []byte("Back package!"))
 					break
 				}
-				recv := c.GetUids(pack.ForwardType, pack.Receiver)
+				err, recv := c.GetUids(pack.ForwardType, pack.Receiver)
+				if err != nil {
+					logger.Error(err.Error())
+					return
+				}
 				if pack.OpCode == OpFileTransfer {
 					if c.uid == recv[0] {
 						// 如果收件人和发件人相同，意味着发件人使用邮件领取单领取邮件（这里是下载已上传的文件）
@@ -118,18 +121,10 @@ func (c *connection) listenRead() { // send to all
 						}
 					}
 				}
-				logger.Debug("Pack package!")
-				/*m := &Pack{
-				Sender:      pack.Sender,
-				Receiver:    pack.Receiver,
-				Body:        pack.Body,
-				TimeStamp:   pack.TimeStamp,
-				OpCode:      pack.OpCode,
-				ForwardType: pack.ForwardType}*/
 				p := &Postman{
-					sUid: c.uid,
-					dUid: recv,
-					pack: &pack}
+					sUid:  c.uid,
+					dUids: recv,
+					pack:  &pack}
 				logger.Trace(p)
 				c.server.Post(p)
 			}
@@ -182,65 +177,64 @@ func (c *connection) Done() {
 
 func (c *connection) OfflinePush() {
 	var (
-		suid  uint64
-		msg   []byte
-		time  int64
-		t     byte
-		dt    byte
-		count int
+		sender    uint64
+		body      []byte
+		timestamp int64
+		opcode    byte
+		fwt       byte
+		count     int
 	)
 	logger.Debug("offline message push")
-	c.server.openDatabase("offlinepusher")
+	c.server.openDatabase("OfflinePush()")
 	defer func() {
-		c.server.closeDatabase("offlinepusher")
+		c.server.closeDatabase("OfflinePush()")
 		logger.Trace("offline message push to %s over", c.uid)
 	}()
 
-	stmt, err := c.server.db.Prepare("SELECT sUID, time, message, packtype, dsttype FROM offlinemessage WHERE dUID=?")
+	stmt, err := c.server.db.Prepare("SELECT Sender, TimeStamp, Body, OpCode, ForwardType FROM offlinemessage WHERE Receiver=?")
 	if err != nil {
 		logger.Error(err.Error())
+		return
 	}
 
 	rows, err := stmt.Query(c.uid)
 	if err != nil {
 		logger.Error(err.Error())
+		return
 	}
 
 	for rows.Next() {
 		count++
-		err = rows.Scan(&suid, &time, &msg, &t, &dt)
+		err = rows.Scan(&sender, &timestamp, &body, &opcode, &fwt)
 		if err != nil {
 			logger.Error(err.Error())
+			return
 		}
-		m := &Pack{
-			Sender:      suid,
-			Receiver:    c.uid,
-			Body:        msg,
-			TimeStamp:   time,
-			OpCode:      t,
-			ForwardType: dt,
-		}
+		m := c.server.pack(sender, c.uid, body, timestamp, opcode, fwt)
 		p := &Postman{
-			sUid: suid,
-			dUid: []uint64{c.uid},
-			pack: m,
+			sUid:  sender,
+			dUids: []uint64{c.uid},
+			pack:  &m,
 		}
 		c.server.Post(p)
 	}
 	logger.Tracef("Push %v message.", count)
 	c.server.openDatabase("delete")
-	stmt, err = c.server.db.Prepare("DELETE FROM offlinemessage WHERE dUID=?")
+	stmt, err = c.server.db.Prepare("DELETE FROM offlinemessage WHERE Receiver=?")
 	if err != nil {
 		logger.Error(err.Error())
+		return
 	}
 
 	_, err = stmt.Exec(c.uid)
 	if err != nil {
 		logger.Error(err.Error())
+		return
 	}
 }
 
-func (c *connection) GetName(id string) string {
+/*
+func (c *connection) GetName(id string) (error, string) {
 	var name string
 	logger.Debug("get name with uid")
 	c.server.openDatabase("GetName()")
@@ -250,105 +244,77 @@ func (c *connection) GetName(id string) string {
 
 	stmt, err := c.server.db.Prepare("SELECT username FROM user WHERE uid=?")
 	if err != nil {
-		logger.Error(err.Error())
+		return err, ""
 	}
 
 	rows, err := stmt.Query(id)
 	if err != nil {
-		logger.Error(err.Error())
+		return err, ""
 	}
 
 	for rows.Next() {
 		err = rows.Scan(&name)
 		if err != nil {
-			logger.Error(err.Error())
+			return err, ""
 		}
 	}
 	logger.Trace("get:", name)
-	return name
-}
+	return nil, name
+}*/
 
-func (c *connection) GetUids(fwt byte, rid uint64) []uint64 {
-	logger.Trace("get", rid, "'s uid")
+func (c *connection) GetUids(fwt byte, rid uint64) (error, []uint64) {
+	logger.Trace("Get ", rid, "'s uid")
 	var (
-		uid  uint64
-		dUid []uint64
-		stmt *sql.Stmt
-		rows *sql.Rows
-		err  error
+		uid   uint64
+		dUids []uint64
+		stmt  *sql.Stmt
+		rows  *sql.Rows
+		err   error
 	)
 	c.server.openDatabase("GetUids()")
 	defer func() {
 		c.server.closeDatabase("GetUids()")
 	}()
 
-	/*if fwt == FwSingle {
-		stmt, err = c.server.db.Prepare("SELECT uid FROM user WHERE username=?")
-		if err != nil {
-			logger.Error("Error:", err.Error())
-		}
-		rows, err = stmt.Query(rid)
-		if err != nil {
-			logger.Error("Error:", err.Error())
-		}
-	} else if fwt == FwGroup {
-		stmt, err = c.server.db.Prepare("SELECT uid FROM ingroup WHERE gid in(SELECT gid FROM game.group WHERE groupname=?)")
-		if err != nil {
-			logger.Error("Error:", err.Error())
-		}
-		rows, err = stmt.Query(rid)
-		if err != nil {
-			logger.Error("Error:", err.Error())
-		}
-	} else if fwt == FwBroadcast {
-		rows, err = c.server.db.Query("SELECT uid FROM user")
-		if err != nil {
-			logger.Error("Error:", err.Error())
-		}
-	} else {
-		logger.Warn("error destination type")
-		return nil
-	}*/
-
 	switch fwt {
 	case FwSingle:
 		stmt, err = c.server.db.Prepare("SELECT uid FROM user WHERE uid=?")
 		if err != nil {
-			logger.Error("Error:", err.Error())
+			return err, nil
 		}
 		rows, err = stmt.Query(rid)
 		if err != nil {
-			logger.Error("Error:", err.Error())
+			return err, nil
 		}
 	case FwGroup:
 		stmt, err = c.server.db.Prepare("SELECT uid FROM ingroup WHERE gid in(SELECT gid FROM game.group WHERE gid=?)")
 		if err != nil {
-			logger.Error("Error:", err.Error())
+			return err, nil
 		}
 		rows, err = stmt.Query(rid)
 		if err != nil {
-			logger.Error("Error:", err.Error())
+			return err, nil
 		}
 	case FwBroadcast:
 		rows, err = c.server.db.Query("SELECT uid FROM user")
 		if err != nil {
-			logger.Error("Error:", err.Error())
+			return err, nil
 		}
 	default:
 		logger.Warn("error destination type")
-		return nil
+		return nil, nil
 	}
 
 	for rows.Next() {
 		err = rows.Scan(&uid)
 		if err != nil {
-			logger.Error("Error:", err.Error())
+			return err, nil
 		}
-		dUid = append(dUid, uid)
+		dUids = append(dUids, uid)
 	}
-	logger.Trace(dUid)
+	logger.Trace("forwarding ids:", dUids)
 
-	return dUid
+	return nil, dUids
 }
 
 func getFilePath(id1 uint64, id2 uint64) string {
@@ -421,7 +387,7 @@ func (c *connection) StoreFile(path string, filename []byte) error {
 func (c *connection) DownloadFile(path string, pack Pack) error {
 	logger.Trace("begin to download file:", path, pack.Body)
 
-	f, err := os.Open("./repertory/" + path + "/" + string(pack.Body))
+	f, err := os.Open("./repertory/" + path + "/" + string(pack.Body)) // get file
 	if err != nil {
 		return err
 	}
@@ -470,14 +436,9 @@ func (c *connection) DownloadFile(path string, pack Pack) error {
 		return err
 	}
 
-	p := &Pack{
-		Sender:      MasterId,
-		Receiver:    c.uid,
-		Body:        file,
-		TimeStamp:   pack.TimeStamp,
-		OpCode:      pack.OpCode,
-		ForwardType: pack.ForwardType,
-	}
-	websocket.JSON.Send(c.ws, p)
+	p := c.server.pack(MasterId, c.uid, file, pack.TimeStamp, pack.OpCode, pack.ForwardType)
+	//websocket.JSON.Send(c.ws, p)
+	pm := NewPostman(c.uid, []uint64{p.Receiver}, &p)
+	c.server.Post(&pm)
 	return nil
 }
