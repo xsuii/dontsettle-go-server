@@ -4,7 +4,7 @@ import (
 	"code.google.com/p/go.net/websocket"
 	"database/sql"
 	"encoding/json"
-	_ "github.com/Go-SQL-Driver/MySQL"
+	_ "github.com/go-sql-driver/mysql"
 	"io"
 	"os"
 	"strconv"
@@ -191,7 +191,7 @@ func (c *connection) OfflinePush() {
 		logger.Trace("offline message push to %s over", c.uid)
 	}()
 
-	stmt, err := c.server.db.Prepare("SELECT Sender, TimeStamp, Body, OpCode, ForwardType FROM offlinemessage WHERE Receiver=?")
+	stmt, err := c.server.db.Prepare("SELECT offMsgSender, offMsgTimeStamp, offMsgBody, offMsgOpCode, offMsgForwardType FROM offline_message WHERE offMsgReceiver=?")
 	if err != nil {
 		logger.Error(err.Error())
 		return
@@ -220,7 +220,7 @@ func (c *connection) OfflinePush() {
 	}
 	logger.Tracef("Push %v message.", count)
 	c.server.openDatabase("delete")
-	stmt, err = c.server.db.Prepare("DELETE FROM offlinemessage WHERE Receiver=?")
+	stmt, err = c.server.db.Prepare("DELETE FROM offline_message WHERE offMsgReceiver=?")
 	if err != nil {
 		logger.Error(err.Error())
 		return
@@ -278,7 +278,7 @@ func (c *connection) GetUids(fwt byte, rid uint64) (error, []uint64) {
 
 	switch fwt {
 	case FwSingle:
-		stmt, err = c.server.db.Prepare("SELECT uid FROM user WHERE uid=?")
+		stmt, err = c.server.db.Prepare("SELECT userId FROM user WHERE userId=?")
 		if err != nil {
 			return err, nil
 		}
@@ -287,7 +287,7 @@ func (c *connection) GetUids(fwt byte, rid uint64) (error, []uint64) {
 			return err, nil
 		}
 	case FwGroup:
-		stmt, err = c.server.db.Prepare("SELECT uid FROM ingroup WHERE gid in(SELECT gid FROM game.group WHERE gid=?)")
+		stmt, err = c.server.db.Prepare("SELECT userId FROM in_circle WHERE circleId in(SELECT circleId FROM game.circle WHERE circleId=?)")
 		if err != nil {
 			return err, nil
 		}
@@ -296,7 +296,7 @@ func (c *connection) GetUids(fwt byte, rid uint64) (error, []uint64) {
 			return err, nil
 		}
 	case FwBroadcast:
-		rows, err = c.server.db.Query("SELECT uid FROM user")
+		rows, err = c.server.db.Query("SELECT userId FROM user")
 		if err != nil {
 			return err, nil
 		}

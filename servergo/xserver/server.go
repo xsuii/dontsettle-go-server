@@ -3,7 +3,7 @@ package xserver
 import (
 	"code.google.com/p/go.net/websocket"
 	"database/sql"
-	_ "github.com/Go-SQL-Driver/MySQL"
+	_ "github.com/go-sql-driver/mysql"
 	"html/template"
 	"net/http"
 	"time"
@@ -100,7 +100,7 @@ func (s *Server) checkLogin(username string, userpasswd string) (uint64, error) 
 		s.closeDatabase("Func_checkLogin()")
 	}()
 
-	stmt, err := s.db.Prepare("select UID, username, userpassword from user where username=? && userpassword=?")
+	stmt, err := s.db.Prepare("select userId, userName, userPassword from user where userName=? && userPassword=?")
 	if err != nil {
 		return 0, err
 	}
@@ -151,7 +151,7 @@ func (s *Server) closeDatabase(who string) {
 func (s *Server) offlineMsgStore(b *Postman, offId []uint64) {
 	logger.Info("store offline message")
 	var affect int
-	stmt, err := s.db.Prepare("INSERT offlinemessage SET Receiver=?, Sender=?, TimeStamp=?, Body=?, OpCode=?, ForwardType=?")
+	stmt, err := s.db.Prepare("INSERT offline_message SET offMsgReceiver=?, offMsgSender=?, offMsgTimeStamp=?, offMsgBody=?, offMsgOpCode=?, offMsgForwardType=?")
 	if err != nil {
 		logger.Error("Error:", err.Error())
 		return

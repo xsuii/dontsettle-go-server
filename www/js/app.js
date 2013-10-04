@@ -19,7 +19,7 @@ var FwBroadcast = 3
 
 var fs = null;
 var wsuri = "ws://xsuii.meibu.net:8001/login";
-var wsbk = "ws://172.18.19.46:8001/login";
+var wsbk = "ws://172.18.19.50:8001/login";
 var dbName = "dontsettle";
 var tbName;
 var msg; // messages recieve from server
@@ -215,7 +215,7 @@ function dropHistory() {
 ///////////////////////////// websocket ///////////////////////////
 
 function onWebSocket() {
-	websocket = new WebSocket(wsuri);
+	websocket = new WebSocket(wsbk);
 	console.log(websocket)
 	websocket.onopen = function(evt) {
 		console.log("CONNECTED")

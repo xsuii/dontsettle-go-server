@@ -16,7 +16,7 @@ import (
 )
 
 func loadLogComfig() {
-	logger, err := mainlog.LoggerFromConfigAsFile("conf/log/color.xml")
+	logger, err := mainlog.LoggerFromConfigAsFile("conf/log/linux/color.xml")
 	if err != nil {
 		fmt.Println(err)
 		return

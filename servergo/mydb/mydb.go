@@ -9,7 +9,7 @@ package mydb
 
 import (
 	"database/sql"
-	_ "github.com/Go-SQL-Driver/MySQL"
+	_ "github.com/go-sql-driver/mysql"
 	"sync"
 )
 
