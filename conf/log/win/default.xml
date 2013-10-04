@@ -1,7 +1,7 @@
 <seelog type="sync">
 	<outputs formatid="dontsettle">
 		<console />
-		<file path="log/log.log" />
+		<file path="logf/log.log" />
 	</outputs>
 	<formats>
 		<format id="dontsettle" format="donsettle %Func : [%LEV] %Msg%n" />

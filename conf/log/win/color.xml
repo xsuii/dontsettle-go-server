@@ -24,7 +24,7 @@
 		<filter levels="critical">
 			<console formatid="criticalColor" />
 		</filter>
-		<file path="log/color.log" formatid="file" />
+		<file path="logf/color.log" formatid="file" />
 	</outputs>
 	<formats>
 		<format id="traceColor" format="[%EscM(34)%Level%EscM(0)] [%RelFile-%FuncShort] : %EscM(44)%EscM(37)%Msg%EscM(0)%n" />
