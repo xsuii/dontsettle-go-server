@@ -1,0 +1,31 @@
+
+<seelog>
+	<outputs>
+		<filter levels="trace">
+			<console formatid="traceColor" />
+		</filter>
+		<filter levels="debug">
+			<console formatid="debugColor" />
+		</filter>
+		<filter levels="info">
+			<console formatid="infoColor" />
+		</filter>
+		<filter levels="warn">
+			<console formatid="warnColor" />
+		</filter>
+		<filter levels="error">
+			<console formatid="errorColor" />
+		</filter>
+		<filter levels="critical">
+			<console formatid="criticalColor" />
+		</filter>
+	</outputs>
+	<formats>
+		<format id="traceColor" format="[%EscM(100)%Level%EscM(0)] %EscM(44)%EscM(37)%Msg%n%EscM(0)" />
+		<format id="debugColor" format="[%EscM(61)%Level%EscM(0)] %EscM(44)%EscM(37)%Msg%n%EscM(0)" />
+		<format id="infoColor" format="[%EscM(62)%Level%EscM(0)] %EscM(44)%EscM(37)%Msg%n%EscM(0)" />
+		<format id="warnColor" format="[%EscM(63)%Level%EscM(0)] %EscM(44)%EscM(37)%Msg%n%EscM(0)" />
+		<format id="errorColor" format="[%EscM(64)%Level%EscM(0)] %EscM(44)%EscM(37)%Msg%n%EscM(0)" />
+		<format id="criticalColor" format="[%EscM(45)%Level%EscM(0)] %EscM(44)%EscM(37)%Msg%n%EscM(0)" />
+	</formats>
+</seelog>

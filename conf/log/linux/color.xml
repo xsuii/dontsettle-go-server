@@ -1,0 +1,38 @@
+<!--
+	On windows, it need to use ansicon to access the escape sequence
+	ansicon(github):https://github.com/adoxa/ansicon
+	* ANSI : http://en.wikipedia.org/wiki/ANSI_escape_code
+	* color pad : http://en.wikipedia.org/wiki/ANSI_escape_code#Colors
+-->
+<seelog>
+	<outputs>
+		<filter levels="trace">
+			<console formatid="traceColor" />
+		</filter>
+		<filter levels="debug">
+			<console formatid="debugColor" />
+		</filter>
+		<filter levels="info">
+			<console formatid="infoColor" />
+		</filter>
+		<filter levels="warn">
+			<console formatid="warnColor" />
+		</filter>
+		<filter levels="error">
+			<console formatid="errorColor" />
+		</filter>
+		<filter levels="critical">
+			<console formatid="criticalColor" />
+		</filter>
+		<file path="log/color.log" formatid="file" />
+	</outputs>
+	<formats>
+		<format id="traceColor" format="[%EscM(37)%Level%EscM(0)] [%File-%FuncShort] : %EscM(44)%EscM(37)%Msg%EscM(0)%n" />
+		<format id="debugColor" format="[%EscM(34)%Level%EscM(0)] [%File-%FuncShort] : %EscM(44)%EscM(37)%Msg%EscM(0)%n" />
+		<format id="infoColor" format="[%EscM(36)%Level%EscM(0)] [%File-%FuncShort] : %EscM(44)%EscM(37)%Msg%EscM(0)%n" />
+		<format id="warnColor" format="[%EscM(30)%Level%EscM(0)] [%File-%FuncShort] : %EscM(44)%EscM(37)%Msg%EscM(0)%n" />
+		<format id="errorColor" format="[%EscM(33)%Level%EscM(0)] [%File-%FuncShort] : %EscM(44)%EscM(37)%Msg%EscM(0)%n" />
+		<format id="criticalColor" format="[%EscM(31)%Level%EscM(0)] [%File-%FuncShort] : %EscM(44)%EscM(37)%Msg%EscM(0)%n" />
+		<format id="file" format="[%Level] [%File-%FuncShort] %Msg%n" />
+	</formats>
+</seelog>

@@ -1,0 +1,9 @@
+<seelog type="sync">
+	<outputs formatid="dontsettle">
+		<console />
+		<file path="log/log.log" />
+	</outputs>
+	<formats>
+		<format id="dontsettle" format="donsettle %Func : [%LEV] %Msg%n" />
+	</formats>
+</seelog>

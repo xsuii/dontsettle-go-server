@@ -1,0 +1,9 @@
+<seelog type="sync">
+	<outputs formatid="debug">
+		<console />
+		<file path="log/debug.log" />
+	</outputs>
+	<formats>
+		<format id="debug" format="[%LEV] [%RelFile-%FuncShort] : %Msg%n" />
+	</formats>
+</seelog>
