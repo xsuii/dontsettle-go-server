@@ -44,7 +44,7 @@ function gameViewModel() {
     // request login
     self.login = function(login) {
         console.log("call login and send identify :", login);
-        localStorage.username = login.lUserName; // store for later use, if not true then set it to null in app.js-onMessage
+        _userName_ = login.lUserName; // store for later use, if not true then set it to null in app.js-onMessage
         doSend(JSON.stringify({ // websocket send
             "Username": login.lUserName,
             "Userpasswd": login.lUserPassWd
@@ -63,8 +63,9 @@ function gameViewModel() {
             fwt = FwBroadcast;
             rc = BroadCastId;
         }
-        var p = new Pack(Number(localStorage.uid), rc, msg.sendMsg, OpChat, fwt);
-        console.log(p);
+        console.log("rc type:", typeof(rc))
+        var p = new Pack(rc, msg.sendMsg, OpChat, fwt);
+        console.log("Message package:", p);
         p.send();
     };
 

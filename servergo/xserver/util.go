@@ -16,3 +16,7 @@ func stringToId(sid string) uint64 {
 	}
 	return i
 }
+
+func int64ToString(i int64) string {
+	return strconv.FormatInt(i, 10)
+}

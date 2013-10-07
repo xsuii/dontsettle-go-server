@@ -17,6 +17,8 @@ const (
 	OpRegister     = 3
 	OpChat         = 4
 	OpFileTransfer = 5
+	OpFileUp       = 6
+	OpFileDown     = 7
 
 	// system id
 	NullId      = 0
@@ -95,7 +97,7 @@ func (s *Server) checkLogin(username string, userpasswd string) (uint64, error) 
 	var effect int
 	var uid uint64
 
-	s.openDatabase("Func_checkLogin():")
+	s.openDatabase("Func_checkLogin()")
 	defer func() {
 		s.closeDatabase("Func_checkLogin()")
 	}()
@@ -119,11 +121,11 @@ func (s *Server) checkLogin(username string, userpasswd string) (uint64, error) 
 			return 0, err
 		}
 
-		logger.Trace("MySQL : [ UID:", uid, " ]  [ Username:", username, " ]  [ Password:", userpassword, " ]")
+		logger.Tracef("MySQL excute result: [ UID: %v ] [ Username: %v ] [ Password: %v ]", uid, username, userpassword)
 	}
 
 	if effect > 0 {
-		logger.Trace(uid, "(uid) login success.")
+		logger.Tracef("%v(uid) login success.", uid)
 		return uid, nil
 	} else {
 		logger.Warn("login fail . . .")
@@ -285,7 +287,7 @@ func (s *Server) masterPack(c *connection, body []byte) {
 func (s *Server) Listen() {
 	logger.Info("Listening server . . .")
 
-	// create handler
+	// create server handler
 	s.clientHandler()
 	s.managerHandler()
 	s.serverState()
@@ -294,8 +296,8 @@ func (s *Server) Listen() {
 		select {
 		case c := <-s.register:
 			s.connections[c.uid] = c
-			logger.Trace("Client Register : ", c.uid)
-			logger.Trace("Current connection :", s.connections)
+			logger.Tracef("Client Register %v(uid): ", c.uid)
+			s.showConnections()
 		case c := <-s.unregister:
 			logger.Trace("Delete Client : ", c.uid)
 			delete(s.connections, c.uid)
@@ -304,25 +306,25 @@ func (s *Server) Listen() {
 			logger.Trace("broadcast : ", bmsg)
 			//s.history = append(s.history, bmsg)
 			s.sendAll(bmsg)
-		case tr := <-s.postman: // Responsible for distributing information(include one-to-one、one-to-many)
-			logger.Trace("postman :", tr)
+		case pm := <-s.postman: // Responsible for distributing information(include one-to-one、one-to-many)
+			s.getPostman(*pm)
 			s.openDatabase("Postman")
 			var off []uint64
-			logger.Trace("postman check connect:", s.connections)
-
-			for _, g := range tr.dUids {
+			var offCount = 0
+			for _, g := range pm.dUids {
 				c := s.connections[g]
 				if c == nil {
-					logger.Trace(g, "offline . . .")
+					offCount++
 					off = append(off, g)
 					continue
 				}
 				select {
-				case c.send <- tr.pack:
+				case c.send <- pm.pack:
 				}
 			}
+			logger.Tracef("%v user offline.", offCount)
 			if len(off) > 0 {
-				s.offlineMsgStore(tr, off)
+				s.offlineMsgStore(pm, off)
 			}
 			s.closeDatabase("Postman")
 		case err := <-s.errCh: // [bug] this dosen's work well
@@ -332,6 +334,17 @@ func (s *Server) Listen() {
 			return
 		}
 	}
+}
+
+func (s *Server) showConnections() {
+	logger.Trace("Current connections:")
+	for i, _ := range s.connections {
+		logger.Tracef("%v,", i)
+	}
+}
+
+func (s *Server) getPostman(pm Postman) {
+	logger.Tracef("\nPostman:\nSender:%v\nReceiver:%v\nPackage:%v", pm.sUid, pm.dUids, pm.pack)
 }
 
 func (s *Server) getTimeStamp() int64 {

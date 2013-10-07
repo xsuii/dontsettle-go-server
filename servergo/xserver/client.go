@@ -17,8 +17,15 @@ type LoginInfo struct {
 }
 
 type File struct {
-	FileName []byte
+	FileName string
 	Body     []byte
+}
+
+type Ticket struct {
+	FSender   uint64
+	FReceiver uint64
+	FileName  string
+	TimeStamp int64
 }
 
 type connection struct {
@@ -44,8 +51,7 @@ func NewClient(ws *websocket.Conn, server *Server) *connection {
 			logger.Error("Login receive error :", err.Error())
 			return nil
 		}
-		logger.Trace(login)
-		logger.Trace("Receive login message : [ Username:", login.Username, " ]  [ Password:", login.Userpasswd, " ]")
+		logger.Tracef("Receive login message : [ Username: %v ]  [ Password: %v ]", login.Username, login.Userpasswd)
 		id, err := server.checkLogin(login.Username, login.Userpasswd)
 		if err != nil {
 			logger.Error(err.Error())
@@ -71,6 +77,7 @@ func (c *connection) listenRead() { // send to all
 	var path string
 	for {
 		var pack Pack
+		logger.Debug("pack:", pack)
 		select {
 		case <-c.doneCh:
 			c.server.Unregister(c)
@@ -85,8 +92,8 @@ func (c *connection) listenRead() { // send to all
 				c.Done()
 				logger.Info("default : done from listen read")
 			} else if err != nil {
-				logger.Error(err.Error())
-				return
+				logger.Error("Package receive error :", err.Error())
+				break
 			} else {
 				// this will deal one-to-one、one-to-many、broadcast、file
 				c.server.showPack("server", "recieve", pack)
@@ -101,31 +108,33 @@ func (c *connection) listenRead() { // send to all
 					logger.Error(err.Error())
 					return
 				}
-				if pack.OpCode == OpFileTransfer {
-					if c.uid == recv[0] {
-						// 如果收件人和发件人相同，意味着发件人使用邮件领取单领取邮件（这里是下载已上传的文件）
-						// [+] if file upload not done yet
-						logger.Trace(c.uid, "download file:", pack.Body)
-						path = getFilePath(pack.Sender, c.uid) // get download file's path]
-						err := c.DownloadFile(path, pack)
-						if err != nil {
-							logger.Error(err.Error())
-						}
-						break
-					} else {
-						logger.Trace(c.uid, "upload file:", pack.Body)
-						path = getFilePath(c.uid, recv[0])
-						err := c.StoreFile(path, pack.Body)
-						if err != nil {
-							logger.Error(err)
-						}
+				switch pack.OpCode {
+				case OpFileUp: // file transfer surport only 1:1 now
+					logger.Trace(c.uid, " upload file:", pack.Body)
+					path = getFilePath(pack.Sender, pack.Receiver, pack.TimeStamp)
+					err := c.StoreFile(path, string(pack.Body))
+					if err != nil {
+						logger.Error(err)
 					}
+				case OpFileDown:
+					var tk Ticket
+					logger.Trace(c.uid, " download file:", string(pack.Body))
+					err = json.Unmarshal(pack.Body, &tk)
+					if err != nil {
+						logger.Error("Unmarshal error :", err.Error())
+					}
+					logger.Tracef("Ticket : %v", tk)
+					path = getFilePath(tk.FSender, tk.FReceiver, tk.TimeStamp) // get download file's path]
+					err := c.DownloadFile(path, tk)
+					if err != nil {
+						logger.Error(err.Error())
+					}
+					continue
 				}
 				p := &Postman{
 					sUid:  c.uid,
 					dUids: recv,
 					pack:  &pack}
-				logger.Trace(p)
 				c.server.Post(p)
 			}
 		}
@@ -188,7 +197,7 @@ func (c *connection) OfflinePush() {
 	c.server.openDatabase("OfflinePush()")
 	defer func() {
 		c.server.closeDatabase("OfflinePush()")
-		logger.Trace("offline message push to %s over", c.uid)
+		logger.Tracef("offline message push to %v(uid) over", c.uid)
 	}()
 
 	stmt, err := c.server.db.Prepare("SELECT offMsgSender, offMsgTimeStamp, offMsgBody, offMsgOpCode, offMsgForwardType FROM offline_message WHERE offMsgReceiver=?")
@@ -219,7 +228,7 @@ func (c *connection) OfflinePush() {
 		c.server.Post(p)
 	}
 	logger.Tracef("Push %v message.", count)
-	c.server.openDatabase("delete")
+	c.server.openDatabase("Clear OffMsg")
 	stmt, err = c.server.db.Prepare("DELETE FROM offline_message WHERE offMsgReceiver=?")
 	if err != nil {
 		logger.Error(err.Error())
@@ -263,7 +272,6 @@ func (c *connection) GetName(id string) (error, string) {
 }*/
 
 func (c *connection) GetUids(fwt byte, rid uint64) (error, []uint64) {
-	logger.Trace("Get ", rid, "'s uid")
 	var (
 		uid   uint64
 		dUids []uint64
@@ -278,6 +286,7 @@ func (c *connection) GetUids(fwt byte, rid uint64) (error, []uint64) {
 
 	switch fwt {
 	case FwSingle:
+		logger.Trace("Get ", rid, "'s uid")
 		stmt, err = c.server.db.Prepare("SELECT userId FROM user WHERE userId=?")
 		if err != nil {
 			return err, nil
@@ -287,6 +296,7 @@ func (c *connection) GetUids(fwt byte, rid uint64) (error, []uint64) {
 			return err, nil
 		}
 	case FwGroup:
+		logger.Trace("Get group ", rid, "'s uid")
 		stmt, err = c.server.db.Prepare("SELECT userId FROM in_circle WHERE circleId in(SELECT circleId FROM game.circle WHERE circleId=?)")
 		if err != nil {
 			return err, nil
@@ -296,6 +306,7 @@ func (c *connection) GetUids(fwt byte, rid uint64) (error, []uint64) {
 			return err, nil
 		}
 	case FwBroadcast:
+		logger.Trace("Get all uid")
 		rows, err = c.server.db.Query("SELECT userId FROM user")
 		if err != nil {
 			return err, nil
@@ -312,19 +323,19 @@ func (c *connection) GetUids(fwt byte, rid uint64) (error, []uint64) {
 		}
 		dUids = append(dUids, uid)
 	}
-	logger.Trace("forwarding ids:", dUids)
+	logger.Trace("Get forwarding ids:", dUids)
 
 	return nil, dUids
 }
 
-func getFilePath(id1 uint64, id2 uint64) string {
-	return idToString(id1) + "/" + idToString(id2)
+func getFilePath(id1 uint64, id2 uint64, ts int64) string {
+	return idToString(id1) + "/" + idToString(id2) + "/" + int64ToString(ts)
 }
 
-func (c *connection) StoreFile(path string, filename []byte) error {
+func (c *connection) StoreFile(path string, filename string) error {
 	// store file in server side
 	var data []byte
-	logger.Trace("begin to store file:", path, filename)
+	logger.Tracef("begin to store file: %v/%v", path, filename)
 	err := websocket.Message.Receive(c.ws, &data)
 	if err != nil {
 		return err
@@ -332,9 +343,9 @@ func (c *connection) StoreFile(path string, filename []byte) error {
 
 	// file content
 	if len(data) > 50 {
-		logger.Debug("Receive file data :", string(data[:50]))
+		logger.Debug("Receive file data :", data[:50])
 	} else {
-		logger.Debug("Receive file data :", string(data))
+		logger.Debug("Receive file data :", data)
 	}
 
 	err = os.MkdirAll("./repertory/"+path, 0777)
@@ -342,7 +353,7 @@ func (c *connection) StoreFile(path string, filename []byte) error {
 		return err
 	}
 
-	f, err := os.Create("./repertory/" + path + "/" + string(filename)) // file name. it should be deleted if exist or add TimeStamp as filename
+	f, err := os.Create("./repertory/" + path + "/" + filename) // file name. it should be deleted if exist or add TimeStamp as filename
 	if err != nil {
 		return err
 	}
@@ -384,10 +395,10 @@ func (c *connection) StoreFile(path string, filename []byte) error {
 }
 
 // this should work by pieces.
-func (c *connection) DownloadFile(path string, pack Pack) error {
-	logger.Trace("begin to download file:", path, pack.Body)
+func (c *connection) DownloadFile(path string, tk Ticket) error {
+	logger.Trace("begin to download file:", path, tk.FileName)
 
-	f, err := os.Open("./repertory/" + path + "/" + string(pack.Body)) // get file
+	f, err := os.Open("./repertory/" + path + "/" + string(tk.FileName)) // get file
 	if err != nil {
 		return err
 	}
@@ -421,13 +432,13 @@ func (c *connection) DownloadFile(path string, pack Pack) error {
 
 	// observe data encode
 	if len(data) > 50 {
-		logger.Trace(string(data[:50]))
+		logger.Trace(data[:50])
 	} else {
-		logger.Trace(string(data))
+		logger.Trace(data)
 	}
 
 	fi := &File{
-		FileName: pack.Body,
+		FileName: tk.FileName,
 		Body:     data,
 	}
 
@@ -436,7 +447,7 @@ func (c *connection) DownloadFile(path string, pack Pack) error {
 		return err
 	}
 
-	p := c.server.pack(MasterId, c.uid, file, pack.TimeStamp, pack.OpCode, pack.ForwardType)
+	p := c.server.pack(MasterId, c.uid, file, tk.TimeStamp, OpFileDown, FwSingle)
 	//websocket.JSON.Send(c.ws, p)
 	pm := NewPostman(c.uid, []uint64{p.Receiver}, &p)
 	c.server.Post(&pm)

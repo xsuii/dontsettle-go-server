@@ -8,6 +8,8 @@ var OpLogin = 2
 var OpRegister = 3
 var OpChat = 4
 var OpFileTransfer = 5
+var OpFileUp = 6
+var OpFileDown = 7
 // special id
 var NullId = 0
 var MasterId = 10000 // app server's system id, it may be good to reserve some id
@@ -16,10 +18,17 @@ var BroadCastId = 10001
 var FwGroup = 1
 var FwSingle = 2
 var FwBroadcast = 3
+var FWT = {};
+FWT[FwSingle] = "single";
+FWT[FwGroup] = "group";
+FWT[FwBroadcast] = "broadcast";
+
+var _userId_;
+var _userName_;
 
 var fs = null;
 var wsuri = "ws://xsuii.meibu.net:8001/login";
-var wsbk = "ws://172.18.19.50:8001/login";
+var wsbk = "ws://localhost:8001/login";
 var dbName = "dontsettle";
 var tbName;
 var msg; // messages recieve from server
@@ -77,7 +86,8 @@ function upFile() {
 	reader.onloadend = function(bytes) {
 		fName = f.value.substring(f.value.lastIndexOf('\\') + 1);
 		console.log("send file:", fName);
-		var p = new Pack(localStorage.uid, sendTo, fName, OpFileTransfer, FwSingle)
+		console.log("file content:", bytes);
+		var p = new Pack(sendTo, fName, OpFileUp, FwSingle)
 		p.send();
 		console.log(bytes.target.result.toString());
 		doSend(bytes.target.result);
@@ -86,40 +96,34 @@ function upFile() {
 }
 
 function addFileNode(file) {
+	console.log("add file node.");
 	var para = document.getElementById("messageBox");
 	var pre = document.createElement("p");
-	pre.innerHTML = "[" + file.ForwardType + "]" + file.Sender + ":" + file.Body;
-	console.log("add file node")
+	pre.innerHTML = "[" + FWT[file.ForwardType] + "]" + file.Sender + ":" + file.Body;
 	pre.style.fontStyle = "italic"; // file node
 	pre.style.fontWeight = "bolder";
 	pre.style.color = "#FF0087";
 	pre.style.backgroundColor = "#D5D5D5"
 	pre.style.padding = "5px";
-	pre.setAttribute("Sender", file.Sender);
-	pre.setAttribute("Receiver", file.Receiver);
+	pre.setAttribute("sender", file.Sender);
+	pre.setAttribute("receiver", file.Receiver);
 	pre.setAttribute("filename", file.Body);
-	pre.setAttribute("datetime", file.DateTime);
-	pre.setAttribute("opcode", file.OpCode);
-	pre.setAttribute("forwardtype", file.ForwardType);
+	pre.setAttribute("timestamp", file.TimeStamp);
 	pre.onclick = function() { // send download file request
-		console.log(this.getAttribute("filename"));
 		var r = confirm("sure download?  " + this.getAttribute("filename"));
 		if (r == true) {
-			/*p = {
-				"Sender": this.getAttribute("Sender"),
-				"Receiver": this.getAttribute("Receiver"),
-				"Body": this.getAttribute("filename"),
-				"DateTime": this.getAttribute("dateTime"),
-				"OpCode": parseInt(this.getAttribute("opcode")),
-				"ForwardType": this.getAttribute("forwardtype")
+			var body = {
+				"FSender": Number(this.getAttribute("sender")),
+				"FReceiver": Number(this.getAttribute("receiver")),
+				"FileName": this.getAttribute("filename"),
+				"TimeStamp": Number(this.getAttribute("timestamp"))
 			};
-			doSend(JSON.stringify(p))*/
-			var p = new Pack(this.getAttribute("Sender"),
-				this.getAttribute("Receiver"),
-				this.getAttribute("filename"),
-				this.getAttribute("dateTime"),
-				parseInt(this.getAttribute("opcode")),
-				this.getAttribute("forwardtype"));
+			console.log("file ticket : ", body);
+			var p = new Pack(
+				MasterId,
+				JSON.stringify(body),
+				OpFileDown,
+				FwSingle);
 			p.send();
 		} else {
 			return;
@@ -131,8 +135,11 @@ function addFileNode(file) {
 	db.transaction(addHistory, errorCB, successCB);
 }
 
-function recieveFile(msg) {
+function receiveFile(msg) {
+	console.log("Receive file")
 	file = UnPack(msg.Body);
+	//file = JSON.parse(msg.Body);
+	console.log("After unpack file:", file);
 	console.log(fs, "begin to recieve file", file.FileName);
 	fs.root.getFile(file.FileName, {
 		create: true
@@ -147,7 +154,7 @@ function recieveFile(msg) {
 				console.log("write error");
 			};
 
-			var blob = new Blob([file.Body], {
+			var blob = new Blob([file.Body], {	// should handle different type of file, png, jpg ...
 				type: "text/plain"
 			});
 			fileWriter.write(blob);
@@ -218,11 +225,11 @@ function onWebSocket() {
 	websocket = new WebSocket(wsbk);
 	console.log(websocket)
 	websocket.onopen = function(evt) {
-		console.log("CONNECTED")
+		console.log("CONNECTED:", evt)
 	};
 
 	websocket.onclose = function(evt) {
-		console.log("DISCONNECTED")
+		console.log("DISCONNECTED:", evt)
 	};
 
 	websocket.onmessage = function(evt) {
@@ -230,17 +237,14 @@ function onWebSocket() {
 	};
 
 	websocket.onerror = function(evt) {
-		console.log(evt)
-		console.log(evt.data)
+		console.log("ERROR:", evt)
 	};
 }
 
 function onMessage(evt) {
 	console.log("OnMessage:", evt)
-	console.log("RESPONSE: " + evt.data);
 	msg = UnPack(evt.data);
-	console.log("after unpack :", msg);
-	console.log("OpCode :" + msg.OpCode);
+	console.log("After Unpack Message:", msg);
 	switch (msg.OpCode) {
 		case OpMaster:
 			console.log(msg);
@@ -249,11 +253,10 @@ function onMessage(evt) {
 			if (msg.Body != "0") {
 				console.log("login success with uid :", msg.Body);
 				// initial user data
-				localStorage.uid = parseInt(msg.Body);
+				_userId_ = parseInt(msg.Body);
 				tbName = "h" + msg.Body; // database table name begins with "h"(history)
 				gameModel.toChatView();
 			} else {
-				localStorage.username = ""; //
 				loginError("user name or userpassword error!");
 			}
 			break;
@@ -264,11 +267,12 @@ function onMessage(evt) {
 			db.transaction(addHistory, errorCB, successCB);
 			break;
 		case OpFileTransfer:
-			if (msg.Sender != MasterId) {
-				addFileNode(msg)
-			} else if (msg.Sender == MasterId) { // recieve file
-				recieveFile(msg)
-			}
+			break;
+		case OpFileUp:
+			addFileNode(msg);
+			break;
+		case OpFileDown:
+			receiveFile(msg);
 			break;
 	}
 	// if login success, recieve string "0"; otherwise recieve "uid+username" which will store later
@@ -283,11 +287,11 @@ function doSend(message) {
 
 // pack message(Object)
 
-function Pack(sender, reciever, body, opcode, forwardtype) {
+function Pack(reciever, body, opcode, forwardtype) {
 	self = this;
-	self.Sender = sender;
-	self.Receiver = reciever;
-	self.Body = window.btoa(body);
+	self.Sender = Number(_userId_);
+	self.Receiver = Number(reciever);
+	self.Body = window.btoa(body); // base64 encode; [bug:chinese unsurport]
 	self.TimeStamp = Math.round(Date.now() / 1000); // Unix timestamp
 	self.OpCode = opcode;
 	self.ForwardType = forwardtype;
@@ -304,6 +308,8 @@ function Pack(sender, reciever, body, opcode, forwardtype) {
 		}));
 	}
 }
+
+// JSON -> struct -> 
 
 function UnPack(pack) {
 	var p = JSON.parse(pack);

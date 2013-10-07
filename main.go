@@ -10,13 +10,17 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"runtime"
 
 	mainlog "github.com/cihub/seelog"
 	"github.com/xsuii/dontsettle/servergo/xserver"
 )
 
+// get program's operation system target
+var platform = runtime.GOOS
+
 func loadLogComfig() {
-	logger, err := mainlog.LoggerFromConfigAsFile("conf/log/linux/color.xml")
+	logger, err := mainlog.LoggerFromConfigAsFile("conf/log/" + platform + "/color.xml") //{ should change according to platform }//
 	if err != nil {
 		fmt.Println(err)
 		return

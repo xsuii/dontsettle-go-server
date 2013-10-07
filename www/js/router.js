@@ -28,8 +28,8 @@ Sammy(function() {
         console.log("go chat");
         switchViewTo(gameModel.chatView);
         gameModel.userInfo({
-            author: localStorage.username,
-            uid: localStorage.uid
+            author: _userName_,
+            uid: _userId_
         });
     });
 

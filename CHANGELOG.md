@@ -1,5 +1,9 @@
 dontsettle changes
 ==================
+## 2013-10-06
+bug:
+	[1] Client-side base64-encode chinese unsurport.
+
 ## 2013-9-27
 bug:
 	[1] Error of add history when fetch offline message by login on client side : It was too fast that couldn't add history in time. 
