@@ -11,14 +11,21 @@ import (
 
 // operation code
 const (
-	OpNull         = 0
-	OpMaster       = 1 // this present master's message, include bad-package...
-	OpLogin        = 2
-	OpRegister     = 3
-	OpChat         = 4
-	OpFileTransfer = 5
-	OpFileUp       = 6
-	OpFileDown     = 7
+	OpNull            = 0
+	OpMaster          = 1 // this present master's message, include bad-package...
+	OpLogin           = 2
+	OpRegister        = 3
+	OpChat            = 4
+	OpFileTransfer    = 5
+	OpFileUp          = 6
+	OpFileDown        = 7
+	OpFileUpReq       = 8
+	OpFileDownReq     = 9
+	OpChatToOne       = 10
+	OpChatToMuti      = 11
+	OpChatBroadcast   = 12
+	OpFileUpReqAckOk  = 13
+	OpFileUpReqAckErr = 14
 
 	// system id
 	NullId      = 0
@@ -33,20 +40,13 @@ const (
 
 type IdType uint64 // use this way to achieve easy-extension
 
+// [TODO] Jesus, The 'Reciever' should be 'Receiver'
 type Pack struct {
-	Sender      uint64 // sender's id
-	Receiver    uint64
-	Body        []byte // filename when Type=file
-	TimeStamp   int64
-	OpCode      byte //
-	ForwardType byte // could be group, single, broadcast define in const
-}
-
-// for one-to-one chat  [later:this can merge with group struct]
-type Postman struct {
-	sUid  uint64
-	dUids []uint64
-	pack  *Pack
+	Sender    uint64 // sender's id
+	Reciever  uint64
+	Body      []byte // filename when Type=file
+	TimeStamp int64
+	OpCode    byte //
 }
 
 type ServerState struct {
@@ -60,11 +60,12 @@ type Server struct {
 	connections    map[uint64]*connection // Registered connections
 	register       chan *connection
 	unregister     chan *connection
-	broadcast      chan Pack
-	postman        chan *Postman
+	multiple       chan *Pack
+	single         chan *Pack
 	errCh          chan error
 	doneCh         chan bool
 	db             *sql.DB
+	fileMan        *FileManager
 }
 
 func NewServer(cPattern string, mPattern string) *Server {
@@ -72,12 +73,12 @@ func NewServer(cPattern string, mPattern string) *Server {
 	connections := make(map[uint64]*connection)
 	register := make(chan *connection)
 	unregister := make(chan *connection)
-	broadcast := make(chan Pack)
-	postman := make(chan *Postman)
+	multiple := make(chan *Pack)
+	single := make(chan *Pack)
 	errCh := make(chan error)
 	doneCh := make(chan bool)
 	db := &sql.DB{}
-
+	fm := NewFileManager()
 	return &Server{
 		cPattern,
 		mPattern,
@@ -85,11 +86,12 @@ func NewServer(cPattern string, mPattern string) *Server {
 		connections,
 		register,
 		unregister,
-		broadcast,
-		postman,
+		multiple,
+		single,
 		errCh,
 		doneCh,
 		db,
+		fm,
 	}
 }
 
@@ -97,9 +99,9 @@ func (s *Server) checkLogin(username string, userpasswd string) (uint64, error) 
 	var effect int
 	var uid uint64
 
-	s.openDatabase("Func_checkLogin()")
+	s.openDatabase("[Func:checkLogin]")
 	defer func() {
-		s.closeDatabase("Func_checkLogin()")
+		s.closeDatabase("[Func:checkLogin]")
 	}()
 
 	stmt, err := s.db.Prepare("select userId, userName, userPassword from user where userName=? && userPassword=?")
@@ -121,7 +123,7 @@ func (s *Server) checkLogin(username string, userpasswd string) (uint64, error) 
 			return 0, err
 		}
 
-		logger.Tracef("MySQL excute result: [ UID: %v ] [ Username: %v ] [ Password: %v ]", uid, username, userpassword)
+		logger.Tracef("MySQL excute result: { UID:%v, Username:%v, Password:%v }", uid, username, userpassword)
 	}
 
 	if effect > 0 {
@@ -150,30 +152,76 @@ func (s *Server) closeDatabase(who string) {
 	}
 }
 
-func (s *Server) offlineMsgStore(b *Postman, offId []uint64) {
+func (s *Server) offlineMsgStore(p *Pack, offId []uint64) {
 	logger.Info("store offline message")
+	s.openDatabase("[OP:Offline messsage store]")
+	defer func() {
+		s.closeDatabase("[OP:Offline messsage store]")
+	}()
 	var affect int
-	stmt, err := s.db.Prepare("INSERT offline_message SET offMsgReceiver=?, offMsgSender=?, offMsgTimeStamp=?, offMsgBody=?, offMsgOpCode=?, offMsgForwardType=?")
+	stmt, err := s.db.Prepare("INSERT offline_message SET offMsgReciever=?, offMsgSender=?, offMsgTimeStamp=?, offMsgBody=?, offMsgOpCode=?")
 	if err != nil {
-		logger.Error("Error:", err.Error())
+		logger.Error("MySQL request error:", err.Error())
 		return
 	}
 
 	for _, d := range offId {
-		_, err := stmt.Exec(d, b.sUid, b.pack.TimeStamp, b.pack.Body, b.pack.OpCode, b.pack.ForwardType)
+		_, err := stmt.Exec(d, p.Sender, p.TimeStamp, p.Body, p.OpCode)
 		if err != nil {
-			logger.Error("Error:", err.Error())
+			logger.Error("MySQL excute error:", err.Error())
 			return
 		}
 		affect++
 	}
 
-	logger.Trace("affect : ", affect)
+	logger.Tracef("Store total %v msg.", affect)
+}
+
+func (s *Server) NewPack(sender uint64, Reciever uint64, timestamp int64, opcode byte, body []byte) *Pack {
+	return &Pack{
+		Sender:    sender,
+		Reciever:  Reciever,
+		TimeStamp: timestamp,
+		OpCode:    opcode,
+		Body:      body,
+	}
+}
+
+// showing a pack
+func (s *Server) showPack(who string, act string, p Pack) {
+	logger.Tracef("%v %v { Sender:%v, Reciever:%v, TimeStamp:%v, OpCode:%v, Body:%v }",
+		who,
+		act,
+		p.Sender,
+		p.Reciever,
+		p.TimeStamp,
+		p.OpCode,
+		string(p.Body))
+}
+
+// check the validity of package
+func (s *Server) validPack(p Pack) bool {
+	logger.Info("Check package's valid.")
+	return p.Reciever != NullId &&
+		p.Sender != NullId &&
+		p.Body != nil &&
+		p.TimeStamp != 0 &&
+		p.OpCode != OpNull
+}
+
+// server's feedback message where a client's wrong request or action
+func (s *Server) masterPack(c *connection, body []byte) {
+	p := &Pack{
+		Sender:    MasterId,
+		Reciever:  c.uid,
+		Body:      body,
+		TimeStamp: s.getTimeStamp(),
+		OpCode:    OpMaster}
+	websocket.JSON.Send(c.ws, p)
 }
 
 func (s *Server) clientHandler() {
 	clientConnected := func(ws *websocket.Conn) {
-		logger.Info("new client connect")
 		defer func() {
 			logger.Info("connection close!")
 			err := ws.Close()
@@ -184,7 +232,8 @@ func (s *Server) clientHandler() {
 
 		client := NewClient(ws, s)
 		if client != nil {
-			s.Register(client)
+			//s.Register(client)
+			s.register <- client
 			client.Listen()
 		}
 	}
@@ -233,59 +282,10 @@ func (s *Server) serverState() {
 	http.HandleFunc("/state", state)
 }
 
-func (s *Server) pack(sender uint64, receiver uint64, body []byte, timestamp int64, opcode byte, forwardtype byte) Pack {
-	return Pack{
-		Sender:      sender,
-		Receiver:    receiver,
-		Body:        body,
-		TimeStamp:   timestamp,
-		OpCode:      opcode,
-		ForwardType: forwardtype,
-	}
-}
-
-func NewPostman(suid uint64, duids []uint64, pack *Pack) Postman {
-	return Postman{
-		sUid:  suid,
-		dUids: duids,
-		pack:  pack,
-	}
-}
-
-// showing a pack
-func (s *Server) showPack(who string, act string, p Pack) {
-	logger.Tracef("\n%s %s package:"+
-		"\n%-20s%-20s%-20s%-15s%-7s%s"+
-		"\n%-20v%-20v%-20v%-15v%-7v%v",
-		who, act,
-		"Sender", "Receiver", "TimeStamp", "ForwardType", "OpCode", "Body",
-		p.Sender, p.Receiver, p.TimeStamp, p.ForwardType, p.OpCode, p.Body)
-}
-
-// check the validity of package
-func (s *Server) validPack(p Pack) bool {
-	return p.Receiver != NullId &&
-		p.Sender != NullId &&
-		p.Body != nil &&
-		p.TimeStamp != 0 &&
-		p.ForwardType != ' ' &&
-		p.OpCode != OpNull
-}
-
-// server's feedback message where a client's wrong request or action
-func (s *Server) masterPack(c *connection, body []byte) {
-	p := &Pack{
-		Sender:      MasterId,
-		Receiver:    c.uid,
-		Body:        body,
-		TimeStamp:   s.getTimeStamp(),
-		OpCode:      OpMaster,
-		ForwardType: FwSingle}
-	websocket.JSON.Send(c.ws, p)
-}
-
 func (s *Server) Listen() {
-	logger.Info("Listening server . . .")
+	logger.Info("Server Listening.")
+
+	go s.fileMan.FileRoute()
 
 	// create server handler
 	s.clientHandler()
@@ -296,37 +296,43 @@ func (s *Server) Listen() {
 		select {
 		case c := <-s.register:
 			s.connections[c.uid] = c
-			logger.Tracef("Client Register %v(uid): ", c.uid)
+			logger.Tracef("Client %v(uid) Register.", c.uid)
 			s.showConnections()
+			//c.DoneSync()
 		case c := <-s.unregister:
-			logger.Trace("Delete Client : ", c.uid)
+			logger.Tracef("Delete Client %v(uid).", c.uid)
 			delete(s.connections, c.uid)
 			close(c.send)
-		case bmsg := <-s.broadcast:
-			logger.Trace("broadcast : ", bmsg)
-			//s.history = append(s.history, bmsg)
-			s.sendAll(bmsg)
-		case pm := <-s.postman: // Responsible for distributing information(include one-to-one、one-to-many)
-			s.getPostman(*pm)
-			s.openDatabase("Postman")
+		case sin := <-s.single:
+			c := s.connections[sin.Reciever]
+			if c != nil {
+				c.send <- sin
+			} else {
+				s.offlineMsgStore(sin, []uint64{sin.Reciever})
+			}
+		case mult := <-s.multiple: // Responsible for distributing information(include one-to-one、one-to-many)
 			var off []uint64
 			var offCount = 0
-			for _, g := range pm.dUids {
-				c := s.connections[g]
-				if c == nil {
+			err, recvs := s.GetUids(mult)
+			if err != nil {
+				logger.Error("Get uid error : ", err.Error())
+				return
+			}
+			for _, r := range recvs { // forwarding message
+				c := s.connections[r]
+				if c == nil { // offline user
 					offCount++
-					off = append(off, g)
+					off = append(off, r)
 					continue
 				}
 				select {
-				case c.send <- pm.pack:
+				case c.send <- mult:
 				}
 			}
 			logger.Tracef("%v user offline.", offCount)
 			if len(off) > 0 {
-				s.offlineMsgStore(pm, off)
+				s.offlineMsgStore(mult, off)
 			}
-			s.closeDatabase("Postman")
 		case err := <-s.errCh: // [bug] this dosen's work well
 			logger.Error(err.Error())
 		case <-s.doneCh: // when server close
@@ -337,14 +343,56 @@ func (s *Server) Listen() {
 }
 
 func (s *Server) showConnections() {
-	logger.Trace("Current connections:")
+	var ids []uint64
 	for i, _ := range s.connections {
-		logger.Tracef("%v,", i)
+		ids = append(ids, i)
 	}
+	logger.Tracef("Current connections : %v", ids)
 }
 
-func (s *Server) getPostman(pm Postman) {
-	logger.Tracef("\nPostman:\nSender:%v\nReceiver:%v\nPackage:%v", pm.sUid, pm.dUids, pm.pack)
+func (s *Server) GetUids(p *Pack) (error, []uint64) {
+	var (
+		uid   uint64
+		dUids []uint64
+		stmt  *sql.Stmt
+		rows  *sql.Rows
+		err   error
+	)
+	s.openDatabase("[Func:GetUids]")
+	defer func() {
+		s.closeDatabase("[Func:GetUids]")
+	}()
+
+	switch p.OpCode {
+	case OpChatToMuti:
+		logger.Trace("Get group ", p.Reciever, "'s uid")
+		stmt, err = s.db.Prepare("SELECT userId FROM in_circle WHERE circleId in(SELECT circleId FROM game.circle WHERE circleId=?)")
+		if err != nil {
+			return err, nil
+		}
+		rows, err = stmt.Query(p.Reciever)
+		if err != nil {
+			return err, nil
+		}
+	case OpChatBroadcast:
+		logger.Info("Broadcast message.")
+		rows, err = s.db.Query("SELECT userId From user")
+		if err != nil {
+			return err, nil
+		}
+	}
+
+	logger.Debug("Scan mysql excute result.")
+	for rows.Next() {
+		err = rows.Scan(&uid)
+		if err != nil {
+			return err, nil
+		}
+		dUids = append(dUids, uid)
+	}
+	logger.Trace("Get forwarding ids:", dUids)
+
+	return nil, dUids
 }
 
 func (s *Server) getTimeStamp() int64 {
@@ -361,14 +409,6 @@ func (s *Server) Unregister(c *connection) {
 	s.unregister <- c
 }
 
-func (s *Server) BroadCast(pack Pack) {
-	s.broadcast <- pack
-}
-
-func (s *Server) Post(p *Postman) {
-	s.postman <- p
-}
-
 func (s *Server) Done() {
 	s.doneCh <- true
 }
@@ -383,8 +423,8 @@ func (s *Server) sendPastMessages(c *connection) {
 	}
 }
 
-func (s *Server) sendAll(pack Pack) {
+func (s *Server) sendAll(pack *Pack) {
 	for _, c := range s.connections {
-		c.Write(&pack)
+		c.Write(pack)
 	}
 }

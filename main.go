@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	_ "net/http/pprof" // profiling go code.
 	"runtime"
 
 	mainlog "github.com/cihub/seelog"
@@ -59,5 +60,8 @@ func main() {
 	http.Handle("/", http.FileServer(http.Dir("www"))) // web root
 
 	mainlog.Info("Listening on port", *addr)
-	mainlog.Critical(http.ListenAndServe(*addr, nil)) // run server
+	err := http.ListenAndServe(*addr, nil) // run server
+	if err != nil {
+		mainlog.Error(err.Error())
+	}
 }

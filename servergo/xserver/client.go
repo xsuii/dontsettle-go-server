@@ -2,11 +2,11 @@ package xserver
 
 import (
 	"code.google.com/p/go.net/websocket"
-	"database/sql"
 	"encoding/json"
 	_ "github.com/go-sql-driver/mysql"
 	"io"
 	"os"
+	"runtime"
 	"strconv"
 	"time"
 )
@@ -21,9 +21,17 @@ type File struct {
 	Body     []byte
 }
 
+type FileSequence struct {
+	FileName   string
+	FileSize   int
+	FileSeq    int
+	SeqContent string
+	SeqSize    int
+}
+
 type Ticket struct {
 	FSender   uint64
-	FReceiver uint64
+	FReciever uint64
 	FileName  string
 	TimeStamp int64
 }
@@ -34,16 +42,15 @@ type connection struct {
 	server *Server         // the server was connected
 	send   chan *Pack      // message channel
 	doneCh chan bool
+	syncCh chan bool
 }
 
-// [later:JSON]
 func NewClient(ws *websocket.Conn, server *Server) *connection {
-	var login LoginInfo
+	var lgif LoginInfo
 
-	logger.Info(" # New Connection # ")
-	logger.Info("Client :", ws.Request().RemoteAddr)
+	logger.Infof(" # New Connection : %v # ", ws.Request().RemoteAddr)
 	for {
-		err := websocket.JSON.Receive(ws, &login) // get uid & Sender
+		err := websocket.JSON.Receive(ws, &lgif) // get uid & Sender
 		if err == io.EOF {
 			logger.Error("Login:recieve EOF")
 			return nil
@@ -51,42 +58,41 @@ func NewClient(ws *websocket.Conn, server *Server) *connection {
 			logger.Error("Login receive error :", err.Error())
 			return nil
 		}
-		logger.Tracef("Receive login message : [ Username: %v ]  [ Password: %v ]", login.Username, login.Userpasswd)
-		id, err := server.checkLogin(login.Username, login.Userpasswd)
+		logger.Tracef("Receive login message : { Username:%v, Password:%v }", lgif.Username, lgif.Userpasswd)
+
+		id, err := server.checkLogin(lgif.Username, lgif.Userpasswd)
 		if err != nil {
 			logger.Error(err.Error())
 			return nil
 		}
+
 		bid := make([]byte, 0) // convert uint64 to []byte
 		bid = strconv.AppendUint(bid, id, 10)
-		p := server.pack(MasterId, id, bid, time.Now().Unix(), OpLogin, FwSingle)
-		websocket.JSON.Send(ws, p)
+		p := server.NewPack(MasterId, id, time.Now().Unix(), OpLogin, bid)
+		websocket.JSON.Send(ws, p) // [fix:it shouldn't be]
 		if id > 0 {
 			return &connection{
 				uid:    id,
 				ws:     ws,
 				server: server,
 				send:   make(chan *Pack),
-				doneCh: make(chan bool)}
+				doneCh: make(chan bool),
+				syncCh: make(chan bool)}
 		}
 	}
 }
 
 func (c *connection) listenRead() { // send to all
 	logger.Debug("listening read")
-	var path string
 	for {
+		//time.Sleep(time.Second)
 		var pack Pack
-		logger.Debug("pack:", pack)
 		select {
 		case <-c.doneCh:
 			c.server.Unregister(c)
 			c.Done()
 			logger.Debug("done from listen read")
 		default:
-			/*var test string
-			err := websocket.Message.Receive(c.ws, &test)
-			log.Println(test)*/
 			err := websocket.JSON.Receive(c.ws, &pack)
 			if err == io.EOF {
 				c.Done()
@@ -97,47 +103,72 @@ func (c *connection) listenRead() { // send to all
 			} else {
 				// this will deal one-to-one、one-to-many、broadcast、file
 				c.server.showPack("server", "recieve", pack)
-				logger.Debug("check pack's validable")
+
 				if !c.server.validPack(pack) {
 					logger.Warn("Bad package!")
-					c.server.masterPack(c, []byte("Back package!"))
+					c.server.masterPack(c, []byte("Back package!")) // [TODO]
 					break
+				} else {
+					logger.Info("Valid package.")
 				}
-				err, recv := c.GetUids(pack.ForwardType, pack.Receiver)
-				if err != nil {
-					logger.Error(err.Error())
-					return
-				}
+
 				switch pack.OpCode {
+				case OpChatToOne:
+					c.server.single <- &pack
+				case OpChatToMuti:
+					fallthrough
+				case OpChatBroadcast:
+					c.server.multiple <- &pack
+				case OpFileUpReq:
+					ft, err := c.server.fileMan.NewFileTaskAndFileTicket(&pack)
+					if err != nil {
+						logger.Errorf("Make new file task error:%v", err.Error())
+						ReqAck := &Pack{
+							Sender:    MasterId,
+							Reciever:  pack.Sender,
+							TimeStamp: time.Now().UnixNano(),
+							OpCode:    OpFileUpReqAckErr,
+							Body:      []byte("You request is invail because of the server side."),
+						}
+						c.server.single <- ReqAck
+						break
+					}
+
+					logger.Tracef("Show new file task : { TaskId:%v, wFile:%v, rFile:%v, FileName:%v, FileSize:%v, Window:%v, Convergence:%v }",
+						ft.taskId,
+						ft.wFile,
+						ft.rFile,
+						ft.fileInfo.FileName,
+						ft.fileInfo.FileSize,
+						ft.window,
+						ft.convergence)
+
+					c.server.fileMan.addTask <- ft
+					ReqAck := &Pack{
+						Sender:    MasterId,
+						Reciever:  pack.Sender,
+						TimeStamp: time.Now().Unix(),
+						OpCode:    OpFileUpReqAckOk,
+						Body:      []byte(ft.taskId),
+					}
+					c.server.single <- ReqAck
+					c.server.single <- &pack // wraping file ticket
+				case OpFileDownReq:
+					logger.Info("Recieve download request.")
+					go c.downloadFile(&pack)
 				case OpFileUp: // file transfer surport only 1:1 now
-					logger.Trace(c.uid, " upload file:", pack.Body)
-					path = getFilePath(pack.Sender, pack.Receiver, pack.TimeStamp)
-					err := c.StoreFile(path, string(pack.Body))
+					var fs FileSeq
+					err := json.Unmarshal(pack.Body, &fs)
 					if err != nil {
-						logger.Error(err)
+						logger.Errorf("[File up]:%v", err.Error())
 					}
-				case OpFileDown:
-					var tk Ticket
-					logger.Trace(c.uid, " download file:", string(pack.Body))
-					err = json.Unmarshal(pack.Body, &tk)
-					if err != nil {
-						logger.Error("Unmarshal error :", err.Error())
-					}
-					logger.Tracef("Ticket : %v", tk)
-					path = getFilePath(tk.FSender, tk.FReceiver, tk.TimeStamp) // get download file's path]
-					err := c.DownloadFile(path, tk)
-					if err != nil {
-						logger.Error(err.Error())
-					}
-					continue
+					c.server.fileMan.fileSeq <- &fs
+				default:
+					// no such operation, and send back an error message.
 				}
-				p := &Postman{
-					sUid:  c.uid,
-					dUids: recv,
-					pack:  &pack}
-				c.server.Post(p)
 			}
 		}
+		//time.Sleep(time.Second)
 	}
 }
 
@@ -184,23 +215,33 @@ func (c *connection) Done() {
 	c.doneCh <- true
 }
 
+// do sync job assciate with Sync()
+func (c *connection) DoneSync() {
+	c.syncCh <- true
+}
+
+// do sync job assciate with DoneSync()
+func (c *connection) Sync() {
+	<-c.syncCh
+}
+
+// [TODO] Just push the latest n message at the login, push more when the client ask.
 func (c *connection) OfflinePush() {
+	logger.Debug("Start offline message push.")
 	var (
 		sender    uint64
 		body      []byte
 		timestamp int64
 		opcode    byte
-		fwt       byte
 		count     int
 	)
-	logger.Debug("offline message push")
-	c.server.openDatabase("OfflinePush()")
+	c.server.openDatabase("[Fund:OfflinePush]")
 	defer func() {
-		c.server.closeDatabase("OfflinePush()")
+		c.server.closeDatabase("[Fund:OfflinePush]")
 		logger.Tracef("offline message push to %v(uid) over", c.uid)
 	}()
 
-	stmt, err := c.server.db.Prepare("SELECT offMsgSender, offMsgTimeStamp, offMsgBody, offMsgOpCode, offMsgForwardType FROM offline_message WHERE offMsgReceiver=?")
+	stmt, err := c.server.db.Prepare("SELECT offMsgSender, offMsgTimeStamp, offMsgBody, offMsgOpCode FROM offline_message WHERE offMsgReciever=?")
 	if err != nil {
 		logger.Error(err.Error())
 		return
@@ -214,22 +255,17 @@ func (c *connection) OfflinePush() {
 
 	for rows.Next() {
 		count++
-		err = rows.Scan(&sender, &timestamp, &body, &opcode, &fwt)
+		err = rows.Scan(&sender, &timestamp, &body, &opcode)
 		if err != nil {
 			logger.Error(err.Error())
 			return
 		}
-		m := c.server.pack(sender, c.uid, body, timestamp, opcode, fwt)
-		p := &Postman{
-			sUid:  sender,
-			dUids: []uint64{c.uid},
-			pack:  &m,
-		}
-		c.server.Post(p)
+		p := c.server.NewPack(sender, c.uid, timestamp, opcode, body)
+		c.server.single <- p
 	}
-	logger.Tracef("Push %v message.", count)
-	c.server.openDatabase("Clear OffMsg")
-	stmt, err = c.server.db.Prepare("DELETE FROM offline_message WHERE offMsgReceiver=?")
+	logger.Tracef("Push total %v message.", count)
+	c.server.openDatabase("[OP:Clear OffMsg]")
+	stmt, err = c.server.db.Prepare("DELETE FROM offline_message WHERE offMsgReciever=?")
 	if err != nil {
 		logger.Error(err.Error())
 		return
@@ -242,214 +278,63 @@ func (c *connection) OfflinePush() {
 	}
 }
 
-/*
-func (c *connection) GetName(id string) (error, string) {
-	var name string
-	logger.Debug("get name with uid")
-	c.server.openDatabase("GetName()")
-	defer func() {
-		c.server.closeDatabase("GetName()")
-	}()
-
-	stmt, err := c.server.db.Prepare("SELECT username FROM user WHERE uid=?")
-	if err != nil {
-		return err, ""
-	}
-
-	rows, err := stmt.Query(id)
-	if err != nil {
-		return err, ""
-	}
-
-	for rows.Next() {
-		err = rows.Scan(&name)
-		if err != nil {
-			return err, ""
-		}
-	}
-	logger.Trace("get:", name)
-	return nil, name
-}*/
-
-func (c *connection) GetUids(fwt byte, rid uint64) (error, []uint64) {
-	var (
-		uid   uint64
-		dUids []uint64
-		stmt  *sql.Stmt
-		rows  *sql.Rows
-		err   error
-	)
-	c.server.openDatabase("GetUids()")
-	defer func() {
-		c.server.closeDatabase("GetUids()")
-	}()
-
-	switch fwt {
-	case FwSingle:
-		logger.Trace("Get ", rid, "'s uid")
-		stmt, err = c.server.db.Prepare("SELECT userId FROM user WHERE userId=?")
-		if err != nil {
-			return err, nil
-		}
-		rows, err = stmt.Query(rid)
-		if err != nil {
-			return err, nil
-		}
-	case FwGroup:
-		logger.Trace("Get group ", rid, "'s uid")
-		stmt, err = c.server.db.Prepare("SELECT userId FROM in_circle WHERE circleId in(SELECT circleId FROM game.circle WHERE circleId=?)")
-		if err != nil {
-			return err, nil
-		}
-		rows, err = stmt.Query(rid)
-		if err != nil {
-			return err, nil
-		}
-	case FwBroadcast:
-		logger.Trace("Get all uid")
-		rows, err = c.server.db.Query("SELECT userId FROM user")
-		if err != nil {
-			return err, nil
-		}
-	default:
-		logger.Warn("error destination type")
-		return nil, nil
-	}
-
-	for rows.Next() {
-		err = rows.Scan(&uid)
-		if err != nil {
-			return err, nil
-		}
-		dUids = append(dUids, uid)
-	}
-	logger.Trace("Get forwarding ids:", dUids)
-
-	return nil, dUids
-}
-
 func getFilePath(id1 uint64, id2 uint64, ts int64) string {
-	return idToString(id1) + "/" + idToString(id2) + "/" + int64ToString(ts)
+	return "./repository/" + idToString(id1) + "/" + idToString(id2) + "/" + int64ToString(ts) + "/"
 }
 
-func (c *connection) StoreFile(path string, filename string) error {
-	// store file in server side
-	var data []byte
-	logger.Tracef("begin to store file: %v/%v", path, filename)
-	err := websocket.Message.Receive(c.ws, &data)
+func (c *connection) downloadFile(pack *Pack) {
+	logger.Info("Begin downloading file.")
+	var ftk FileTicket
+	err := json.Unmarshal(pack.Body, &ftk)
 	if err != nil {
-		return err
+		logger.Errorf("[File down request]:%v", &ftk)
 	}
 
-	// file content
-	if len(data) > 50 {
-		logger.Debug("Receive file data :", data[:50])
-	} else {
-		logger.Debug("Receive file data :", data)
+	ft := c.server.fileMan.fileTasks[ftk.TaskId]
+	if ft == nil {
+		logger.Error("No such file task.")
+		return
 	}
-
-	err = os.MkdirAll("./repertory/"+path, 0777)
+	logger.Tracef("Show task:%v", ft)
+	ft.rFile, err = os.Open(ft.path)
 	if err != nil {
-		return err
+		logger.Error(err.Error())
 	}
 
-	f, err := os.Create("./repertory/" + path + "/" + filename) // file name. it should be deleted if exist or add TimeStamp as filename
-	if err != nil {
-		return err
-	}
-	defer func() {
-		err := f.Close()
-		if err != nil {
-			logger.Error(err.Error())
-		}
-		logger.Info("finish storing file")
-	}()
-
-	d := make([]byte, 4096)
-	l := len(data)
-	var p int
-	if l < 4096 {
-		d = data[0:]
-		_, err := f.Write(d)
-		if err != nil {
-			return err
-		}
-	} else {
-		for p < l/4096 {
-			d = data[p*4096 : (p+1)*4096]
-			_, err := f.Write(d)
-			if err != nil {
-				return err
-			}
-			p++
-		}
-		if l%4096 != 0 { // tail of file
-			d = data[p*4096:]
-			_, err := f.Write(d)
-			if err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-// this should work by pieces.
-func (c *connection) DownloadFile(path string, tk Ticket) error {
-	logger.Trace("begin to download file:", path, tk.FileName)
-
-	f, err := os.Open("./repertory/" + path + "/" + string(tk.FileName)) // get file
-	if err != nil {
-		return err
-	}
-	defer func() {
-		err := f.Close()
-		if err != nil {
-			logger.Error(err.Error())
-		}
-		logger.Info("download file done")
-	}()
-
-	buf := make([]byte, 1024)
-	var data []byte
+	var num int
+	b := make([]byte, SeqLength)
 	for {
-		n, err := f.Read(buf)
-		if err != nil && err != io.EOF {
+		if ft.convergence < ft.window {
+			n, err := ft.rFile.Read(b)
 			if err != nil {
-				return err
+				logger.Error(err.Error())
 			}
-		}
-		if n != 0 {
-			if n < 1024 {
-				data = append(data, buf[0:n]...)
-			} else {
-				data = append(data, buf...)
+			logger.Tracef("Read %v bytes:{%v}", n, string(b))
+			ft.convergence += n
+
+			fs := &FileSeq{
+				TaskId:     ftk.TaskId,
+				SeqNum:     num,
+				SeqSize:    n,
+				SeqContent: string(b[0:n]),
 			}
+			logger.Tracef("Show download sequence:%v", fs)
+			bd, err := json.Marshal(fs)
+			if err != nil {
+				logger.Error(err.Error())
+			}
+			p := c.server.NewPack(pack.Reciever, pack.Sender, c.server.getTimeStamp(), OpFileDown, bd)
+			logger.Tracef("Show package:%v", string(p.Body))
+			c.server.single <- p
+
+			num++
+		} else if ft.window < ft.fileInfo.FileSize {
+			runtime.Gosched()
 		} else {
-			break
+			logger.Infof("Download {%v} complete.", ft.fileInfo.FileName)
+			c.server.fileMan.delTask <- ft
+			return
 		}
 	}
-
-	// observe data encode
-	if len(data) > 50 {
-		logger.Trace(data[:50])
-	} else {
-		logger.Trace(data)
-	}
-
-	fi := &File{
-		FileName: tk.FileName,
-		Body:     data,
-	}
-
-	file, err := json.Marshal(fi)
-	if err != nil {
-		return err
-	}
-
-	p := c.server.pack(MasterId, c.uid, file, tk.TimeStamp, OpFileDown, FwSingle)
-	//websocket.JSON.Send(c.ws, p)
-	pm := NewPostman(c.uid, []uint64{p.Receiver}, &p)
-	c.server.Post(&pm)
-	return nil
+	logger.Info("Download end.")
 }

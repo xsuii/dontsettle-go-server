@@ -54,17 +54,17 @@ function gameViewModel() {
     self.sendMessage = function(msg) {
         console.log("send message", msg);
         if (msg.toOne != "") {
-            fwt = FwSingle;
+            opcode = OpChatToOne;
             rc = msg.toOne;
         } else if (msg.toGroup != "") {
-            fwt = FwGroup;
+            opcode = OpChatToMuti;
             rc = msg.toGroup;
         } else {
-            fwt = FwBroadcast;
+            opcode = OpChatBroadcast;
             rc = BroadCastId;
         }
         console.log("rc type:", typeof(rc))
-        var p = new Pack(rc, msg.sendMsg, OpChat, fwt);
+        var p = new Package(rc, msg.sendMsg, opcode);
         console.log("Message package:", p);
         p.send();
     };

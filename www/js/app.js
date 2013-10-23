@@ -10,18 +10,25 @@ var OpChat = 4
 var OpFileTransfer = 5
 var OpFileUp = 6
 var OpFileDown = 7
+var OpFileUpReq = 8
+var OpFileDownReq = 9
+var OpChatToOne = 10
+var OpChatToMuti = 11
+var OpChatBroadcast = 12
+var OpFileUpReqAckOk = 13
+var OpFileUpReqAckErr = 14
+
 // special id
 var NullId = 0
 var MasterId = 10000 // app server's system id, it may be good to reserve some id
 var BroadCastId = 10001
-// forward type
-var FwGroup = 1
-var FwSingle = 2
-var FwBroadcast = 3
+
+var SEQ_LENGTH = 10;
+
 var FWT = {};
-FWT[FwSingle] = "single";
-FWT[FwGroup] = "group";
-FWT[FwBroadcast] = "broadcast";
+FWT[OpChatToOne] = "single";
+FWT[OpChatToMuti] = "group";
+FWT[OpChatBroadcast] = "broadcast";
 
 var _userId_;
 var _userName_;
@@ -33,6 +40,9 @@ var dbName = "dontsettle";
 var tbName;
 var msg; // messages recieve from server
 var db = window.openDatabase(dbName, "1.0", "history store", 1000);
+
+// A map to own file task as a file manager.{ key:UUID, value:filename }
+var FileTask = {};
 
 function init() {
 	if (window.requestFileSystem) {
@@ -73,57 +83,115 @@ function initFS() {
 	}, errorFile);
 }
 
-function upFile() {
-	console.log("file upload fire");
+function ab2str(buf) {
+	return String.fromCharCode.apply(null, new Uint16Array(buf));
+}
+
+function str2ab(str) {
+	var buf = new ArrayBuffer(str.length * 2); // 2 bytes for each char
+	var bufView = new Uint16Array(buf);
+	for (var i = 0, strLen = str.length; i < strLen; i++) {
+		bufView[i] = str.charCodeAt(i);
+	}
+	return buf;
+}
+
+function upFileReq() {
+	console.log("Send file upload request.");
 	var f = document.getElementById("file");
 	var sendTo = document.getElementById("one").value;
+	var file = f.files[0];
+	var fName = file.name;
 	if (sendTo == null || sendTo == "") {
 		document.getElementById("chatError").innerHTML = "Please fill up the one you send to";
 		return;
 	}
-	var reader = new FileReader();
-	var t = new Date();
-	reader.onloadend = function(bytes) {
-		fName = f.value.substring(f.value.lastIndexOf('\\') + 1);
-		console.log("send file:", fName);
-		console.log("file content:", bytes);
-		var p = new Pack(sendTo, fName, OpFileUp, FwSingle)
-		p.send();
-		console.log(bytes.target.result.toString());
-		doSend(bytes.target.result);
+
+	var fileInfo = {
+		"FileName": fName,
+		"FileSize": file.size
 	};
-	reader.readAsArrayBuffer(f.files[0]);
+	console.log("file info:", fileInfo);
+	var p = new Package(sendTo, JSON.stringify(fileInfo), OpFileUpReq) // send file title
+	p.send();
+}
+
+function uploadFileInPiece(taskId) {
+	console.log("Start sending file in pieces.");
+	var f = document.getElementById("file");
+	var sendTo = document.getElementById("one").value;
+	var file = f.files[0];
+	var fName = file.name;
+	if (sendTo == null || sendTo == "") {
+		document.getElementById("chatError").innerHTML = "Please fill up the one you send to";
+		return;
+	}
+
+	var reader = new FileReader();
+	reader.onloadend = function(evt) {
+		var content = evt.target.result;
+		console.log(content.slice(0, 10));
+
+		var p = new Package(sendTo, "", OpFileUp) // send file title
+		var fileSequence = {
+			TaskId: taskId
+		};
+		console.log("show head 100:", content.slice(0, 100));
+
+		// <=1024; >1024 && size%1024==0; >1024 && size%1024>0
+		if (file.size < SEQ_LENGTH) {
+			fileSequence["SeqNum"] = 0;
+			fileSequence["SeqContent"] = content.slice(0, file.size);
+			fileSequence["SeqSize"] = file.size;
+			console.log(fileSequence);
+			p.Body = window.btoa(JSON.stringify(fileSequence));
+			p.send();
+		} else {
+			for (var i = 0; i < file.size / SEQ_LENGTH - 1; i++) {
+				fileSequence["SeqNum"] = i;
+				fileSequence["SeqContent"] = content.slice(i * SEQ_LENGTH, (i + 1) * SEQ_LENGTH);
+				fileSequence["SeqSize"] = SEQ_LENGTH;
+				console.log(fileSequence);
+				p.Body = window.btoa(JSON.stringify(fileSequence));
+				p.send();
+			}
+			if (file.size % SEQ_LENGTH > 0) {
+				fileSequence["SeqNum"] = i;
+				fileSequence["SeqContent"] = content.slice(i * SEQ_LENGTH, i * SEQ_LENGTH + file.size % SEQ_LENGTH);
+				fileSequence["SeqSize"] = file.size % SEQ_LENGTH;
+				console.log(fileSequence);
+				p.Body = window.btoa(JSON.stringify(fileSequence));
+				p.send();
+			};
+		}
+	};
+	reader.readAsText(file);
+	console.log("upload file end.")
 }
 
 function addFileNode(file) {
 	console.log("add file node.");
+	jTicket = JSON.parse(file.Body);
+	FileTask[jTicket.TaskId] = jTicket.FileInfo.FileName; // add task
+	console.log("Show file task:", FileTask)
 	var para = document.getElementById("messageBox");
 	var pre = document.createElement("p");
-	pre.innerHTML = "[" + FWT[file.ForwardType] + "]" + file.Sender + ":" + file.Body;
+	pre.innerHTML = "[" + FWT[OpChatToOne] + "]" + file.Sender + ":" + jTicket.FileInfo.FileName;
 	pre.style.fontStyle = "italic"; // file node
 	pre.style.fontWeight = "bolder";
 	pre.style.color = "#FF0087";
 	pre.style.backgroundColor = "#D5D5D5"
 	pre.style.padding = "5px";
-	pre.setAttribute("sender", file.Sender);
-	pre.setAttribute("receiver", file.Receiver);
-	pre.setAttribute("filename", file.Body);
-	pre.setAttribute("timestamp", file.TimeStamp);
+	pre.setAttribute("fileTicket", file.Body);
 	pre.onclick = function() { // send download file request
-		var r = confirm("sure download?  " + this.getAttribute("filename"));
+		var body = this.getAttribute("fileTicket");
+		var r = confirm("sure download? " + jTicket.FileInfo.FileName + jTicket.FileInfo.FileSize);
 		if (r == true) {
-			var body = {
-				"FSender": Number(this.getAttribute("sender")),
-				"FReceiver": Number(this.getAttribute("receiver")),
-				"FileName": this.getAttribute("filename"),
-				"TimeStamp": Number(this.getAttribute("timestamp"))
-			};
-			console.log("file ticket : ", body);
-			var p = new Pack(
+			console.log("Show file ticket : ", body);
+			var p = new Package(
 				MasterId,
-				JSON.stringify(body),
-				OpFileDown,
-				FwSingle);
+				body,
+				OpFileDownReq);
 			p.send();
 		} else {
 			return;
@@ -135,32 +203,31 @@ function addFileNode(file) {
 	db.transaction(addHistory, errorCB, successCB);
 }
 
+// Use file taskId(the FileTask map's key,UUID) to decide which file to create/write
 function receiveFile(msg) {
-	console.log("Receive file")
-	file = UnPack(msg.Body);
-	//file = JSON.parse(msg.Body);
-	console.log("After unpack file:", file);
-	console.log(fs, "begin to recieve file", file.FileName);
-	fs.root.getFile(file.FileName, {
+	fileSeq = JSON.parse(msg.Body);
+	fileName = FileTask[fileSeq.TaskId];
+	console.log("Receive file:", fileName);
+	console.log("Show file sequence:", fileSeq);
+	fs.root.getFile(fileName, {
 		create: true
 	}, function(fileEntry) {
 		fileEntry.createWriter(function(fileWriter) {
-			console.log("file_writer_test_s");
+			fileWriter.seek(fileWriter.length);
 			fileWriter.onwriteend = function(e) {
-				console.log("get file done");
+				console.log("write file done");
 			};
 
 			fileWriter.onerror = function(e) {
 				console.log("write error");
 			};
 
-			var blob = new Blob([file.Body], {	// should handle different type of file, png, jpg ...
+			var blob = new Blob([fileSeq.SeqContent], { // should handle different type of file, png, jpg ...
 				type: "text/plain"
 			});
 			fileWriter.write(blob);
 		}, errorFile);
 	}, errorFile);
-	console.log("file_writer_test_e");
 }
 
 ////////////////////// database operate  ///////////////////////
@@ -204,7 +271,7 @@ function getHistorySuccess(tx, results) {
 }
 
 function errorCB(tx, err) {
-	alert("Error processing SQL: " + err);
+	console.log("Error processing SQL: " + err);
 }
 
 function successCB() {
@@ -255,6 +322,7 @@ function onMessage(evt) {
 				// initial user data
 				_userId_ = parseInt(msg.Body);
 				tbName = "h" + msg.Body; // database table name begins with "h"(history)
+				console.log("create history table : ", tbName);
 				gameModel.toChatView();
 			} else {
 				loginError("user name or userpassword error!");
@@ -262,14 +330,23 @@ function onMessage(evt) {
 			break;
 		case OpRegister:
 			break;
-		case OpChat:
+		case OpChatToOne:
+		case OpChatToMuti:
+		case OpChatBroadcast:
 			gameModel.addChats(msg); // show to scroll
 			db.transaction(addHistory, errorCB, successCB);
 			break;
 		case OpFileTransfer:
 			break;
-		case OpFileUp:
+		case OpFileUpReq:
 			addFileNode(msg);
+			break;
+		case OpFileUpReqAckOk:
+			console.log("Upload file ready.");
+			uploadFileInPiece(msg.Body);
+			break;
+		case OpFileUpReqAckErr:
+			alert(msg.Body.toString())
 			break;
 		case OpFileDown:
 			receiveFile(msg);
@@ -287,24 +364,22 @@ function doSend(message) {
 
 // pack message(Object)
 
-function Pack(reciever, body, opcode, forwardtype) {
+function Package(reciever, body, opcode) {
 	self = this;
 	self.Sender = Number(_userId_);
-	self.Receiver = Number(reciever);
+	self.Reciever = Number(reciever);
 	self.Body = window.btoa(body); // base64 encode; [bug:chinese unsurport]
 	self.TimeStamp = Math.round(Date.now() / 1000); // Unix timestamp
 	self.OpCode = opcode;
-	self.ForwardType = forwardtype;
 
 	self.send = function() {
 		console.log("send package");
 		doSend(JSON.stringify({
 			"Sender": self.Sender,
-			"Receiver": self.Receiver,
+			"Reciever": self.Reciever,
 			"Body": self.Body,
 			"TimeStamp": self.TimeStamp,
 			"OpCode": self.OpCode,
-			"ForwardType": self.ForwardType,
 		}));
 	}
 }

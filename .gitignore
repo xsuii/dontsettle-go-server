@@ -6,8 +6,9 @@
 # Folders
 _obj
 _test
-repertory
+repository
 logf
+note
 
 # Architecture specific extensions/prefixes
 *.[568vq]
