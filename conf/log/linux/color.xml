@@ -27,11 +27,11 @@
 		<file path="logf/color.log" formatid="file" />
 	</outputs>
 	<formats>
-		<format id="traceColor" format="[%EscM(1)%EscM(38;5;254)%Level%EscM(0)] [%EscM(1)%EscM(38;5;8)%File-%FuncShort%EscM(0)] : %EscM(1)%EscM(38;5;28)%Msg%EscM(0)%n" />
+		<format id="traceColor" format="[%EscM(1)%EscM(38;5;254)%Level%EscM(0)] [%EscM(1)%EscM(38;5;8)%File-%FuncShort%EscM(0)] : %EscM(1)%EscM(38;5;250)%Msg%EscM(0)%n" />
 		<format id="debugColor" format="[%EscM(1)%EscM(38;5;21)%Level%EscM(0)] [%EscM(1)%EscM(38;5;8)%File-%FuncShort%EscM(0)] : %EscM(1)%EscM(38;5;28)%Msg%EscM(0)%n" />
 		<format id="infoColor" format="[%EscM(1)%EscM(38;5;118)%Level%EscM(0)] [%EscM(1)%EscM(38;5;8)%File-%FuncShort%EscM(0)] : %EscM(1)%EscM(38;5;28)%Msg%EscM(0)%n" />
 		<format id="warnColor" format="[%EscM(1)%EscM(38;5;202)%Level%EscM(0)] [%EscM(1)%EscM(38;5;8)%File-%FuncShort%EscM(0)] : %EscM(1)%EscM(38;5;28)%Msg%EscM(0)%n" />
-		<format id="errorColor" format="[%EscM(1)%EscM(38;5;9)%Level%EscM(0)] [%EscM(1)%EscM(38;5;8)%File-%FuncShort%EscM(0)] : %EscM(1)%EscM(38;5;28)%Msg%EscM(0)%n" />
+		<format id="errorColor" format="[%EscM(1)%EscM(38;5;9)%Level%EscM(0)] [%EscM(1)%EscM(38;5;8)%File-%FuncShort%EscM(0)] : %EscM(1)%EscM(38;5;9)%Msg%EscM(0)%n" />
 		<format id="criticalColor" format="[%EscM(1)%EscM(38;5;200)%Level%EscM(0)] [%EscM(1)%EscM(38;5;8)%File-%FuncShort%EscM(0)] : %EscM(1)%EscM(38;5;28)%Msg%EscM(0)%n" />
 		<format id="file" format="[%Level] [%File-%FuncShort] %Msg%n" />
 	</formats>
