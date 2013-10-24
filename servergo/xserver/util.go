@@ -2,6 +2,7 @@ package xserver
 
 import (
 	"strconv"
+	"time"
 )
 
 var sync = make(chan bool)
@@ -21,6 +22,10 @@ func stringToId(sid string) uint64 {
 
 func int64ToString(i int64) string {
 	return strconv.FormatInt(i, 10)
+}
+
+func getTimeStamp() int64 {
+	return time.Now().Unix()
 }
 
 // Pause for debug

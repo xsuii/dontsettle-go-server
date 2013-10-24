@@ -3,50 +3,65 @@ package xserver
 import (
 	"code.google.com/p/go.net/websocket"
 	"database/sql"
+	"encoding/json"
 	_ "github.com/go-sql-driver/mysql"
 	"html/template"
 	"net/http"
 	"time"
 )
 
-// operation code
+var _ = time.Second
+
 const (
-	OpNull            = 0
-	OpMaster          = 1 // this present master's message, include bad-package...
-	OpLogin           = 2
-	OpRegister        = 3
-	OpChat            = 4
-	OpFileTransfer    = 5
-	OpFileUp          = 6
-	OpFileDown        = 7
-	OpFileUpReq       = 8
-	OpFileDownReq     = 9
-	OpChatToOne       = 10
-	OpChatToMuti      = 11
-	OpChatBroadcast   = 12
-	OpFileUpReqAckOk  = 13
-	OpFileUpReqAckErr = 14
+	// operation code
+	OpNull           = 0
+	OpMaster         = 1 // this present master's message, include bad-package...
+	OpLogin          = 2
+	OpRegister       = 3
+	OpChat           = 4
+	OpFileTransfer   = 5
+	OpFileUp         = 6
+	OpFileDown       = 7
+	OpFileUpReq      = 8
+	OpFileDownReq    = 9
+	OpChatToOne      = 10
+	OpChatToMuti     = 11
+	OpChatBroadcast  = 12
+	OpFileUpReqAckOk = 13
+	OpError          = 14
+
+	// error code
+	ErrFileUpReqAck = 1
+	ErrOperation    = 2
 
 	// system id
 	NullId      = 0
 	MasterId    = 10000
-	BroadCastId = 10001
-
-	// ForwardType
-	FwGroup     = 1
-	FwSingle    = 2
-	FwBroadcast = 3
+	BroadCastId = 10001 //
 )
 
 type IdType uint64 // use this way to achieve easy-extension
+
+type ResponseError struct {
+	Code    int    // error code
+	Message string //error message
+}
+
+type ServerError struct {
+	Message string
+}
+
+func (e ServerError) Error() string {
+	return e.Message
+}
 
 // [TODO] Jesus, The 'Reciever' should be 'Receiver'
 type Pack struct {
 	Sender    uint64 // sender's id
 	Reciever  uint64
-	Body      []byte // filename when Type=file
+	Body      []byte
 	TimeStamp int64
-	OpCode    byte //
+	OpCode    byte
 }
 
 type ServerState struct {
@@ -60,8 +75,8 @@ type Server struct {
 	connections    map[uint64]*connection // Registered connections
 	register       chan *connection
 	unregister     chan *connection
-	multiple       chan *Pack
-	single         chan *Pack
+	toMuti         chan *Pack
+	toOne          chan *Pack
 	errCh          chan error
 	doneCh         chan bool
 	db             *sql.DB
@@ -73,26 +88,27 @@ func NewServer(cPattern string, mPattern string) *Server {
 	connections := make(map[uint64]*connection)
 	register := make(chan *connection)
 	unregister := make(chan *connection)
-	multiple := make(chan *Pack)
-	single := make(chan *Pack)
+	toMuti := make(chan *Pack)
+	toOne := make(chan *Pack)
 	errCh := make(chan error)
 	doneCh := make(chan bool)
 	db := &sql.DB{}
-	fm := NewFileManager()
-	return &Server{
+	sv := &Server{
 		cPattern,
 		mPattern,
 		history,
 		connections,
 		register,
 		unregister,
-		multiple,
-		single,
+		toMuti,
+		toOne,
 		errCh,
 		doneCh,
 		db,
-		fm,
+		&FileManager{},
 	}
+	sv.fileMan = NewFileManager(sv)
+	return sv
 }
 
 func (s *Server) checkLogin(username string, userpasswd string) (uint64, error) {
@@ -189,7 +205,7 @@ func (s *Server) NewPack(sender uint64, Reciever uint64, timestamp int64, opcode
 
 // showing a pack
 func (s *Server) showPack(who string, act string, p Pack) {
-	logger.Tracef("%v %v { Sender:%v, Reciever:%v, TimeStamp:%v, OpCode:%v, Body:%v }",
+	logger.Tracef("%v %v \x1b[38;5;200m{ Sender:%v, Reciever:%v, TimeStamp:%v, OpCode:%v, Body:%v }\x1b[0m",
 		who,
 		act,
 		p.Sender,
@@ -200,13 +216,31 @@ func (s *Server) showPack(who string, act string, p Pack) {
 }
 
 // check the validity of package
-func (s *Server) validPack(p Pack) bool {
+func (s *Server) checkPackValid(p Pack) error {
 	logger.Info("Check package's valid.")
-	return p.Reciever != NullId &&
+	if p.Reciever != NullId &&
 		p.Sender != NullId &&
 		p.Body != nil &&
 		p.TimeStamp != 0 &&
-		p.OpCode != OpNull
+		p.OpCode != OpNull {
+		return ServerError{
+			"Receive bad package",
+		}
+	} else {
+		return nil
+	}
+}
+
+func (s *Server) errorWrapper(code int, errMsg string) []byte {
+	wrap := &ResponseError{
+		Code:    code,
+		Message: errMsg,
+	}
+	bWrap, err := json.Marshal(wrap)
+	if err != nil {
+		logger.Error(err.Error())
+	}
+	return bWrap
 }
 
 // server's feedback message where a client's wrong request or action
@@ -215,7 +249,7 @@ func (s *Server) masterPack(c *connection, body []byte) {
 		Sender:    MasterId,
 		Reciever:  c.uid,
 		Body:      body,
-		TimeStamp: s.getTimeStamp(),
+		TimeStamp: getTimeStamp(),
 		OpCode:    OpMaster}
 	websocket.JSON.Send(c.ws, p)
 }
@@ -303,14 +337,14 @@ func (s *Server) Listen() {
 			logger.Tracef("Delete Client %v(uid).", c.uid)
 			delete(s.connections, c.uid)
 			close(c.send)
-		case sin := <-s.single:
+		case sin := <-s.toOne:
 			c := s.connections[sin.Reciever]
 			if c != nil {
 				c.send <- sin
 			} else {
 				s.offlineMsgStore(sin, []uint64{sin.Reciever})
 			}
-		case mult := <-s.multiple: // Responsible for distributing information(include one-to-one、one-to-many)
+		case mult := <-s.toMuti: // Responsible for distributing information(include one-to-one、one-to-many)
 			var off []uint64
 			var offCount = 0
 			err, recvs := s.GetUids(mult)
@@ -393,10 +427,6 @@ func (s *Server) GetUids(p *Pack) (error, []uint64) {
 	logger.Trace("Get forwarding ids:", dUids)
 
 	return nil, dUids
-}
-
-func (s *Server) getTimeStamp() int64 {
-	return time.Now().Unix()
 }
 
 // add client

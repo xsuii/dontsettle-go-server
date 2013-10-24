@@ -11,6 +11,9 @@ import (
 	"time"
 )
 
+var _ = os.Mkdir
+var _ = runtime.GOOS
+
 type LoginInfo struct {
 	Username   string
 	Userpasswd string
@@ -97,75 +100,56 @@ func (c *connection) listenRead() { // send to all
 			if err == io.EOF {
 				c.Done()
 				logger.Info("default : done from listen read")
+				break
 			} else if err != nil {
 				logger.Error("Package receive error :", err.Error())
 				break
+			}
+			c.server.showPack("server", "recieve", pack)
+
+			if err := c.server.checkPackValid(pack); err != nil {
+				logger.Error(err.Error())
+				c.server.masterPack(c, []byte("Back package!")) // [TODO]
+				break
 			} else {
-				// this will deal one-to-one、one-to-many、broadcast、file
-				c.server.showPack("server", "recieve", pack)
+				logger.Info("Package is valid.")
+			}
 
-				if !c.server.validPack(pack) {
-					logger.Warn("Bad package!")
-					c.server.masterPack(c, []byte("Back package!")) // [TODO]
+			switch pack.OpCode {
+			case OpChatToOne: // chat
+				c.server.toOne <- &pack
+			case OpChatToMuti:
+				fallthrough
+			case OpChatBroadcast:
+				c.server.toMuti <- &pack
+			case OpFileUpReq:
+				ft, fTk, err := c.server.fileMan.NewFileTaskAndFileTicket(&pack)
+				if err != nil {
+					logger.Errorf("Make new file task error:%v", err.Error())
+					body := c.server.errorWrapper(ErrFileUpReqAck, "You request is invail because of the server side.")
+					c.Response(OpError, body)
 					break
-				} else {
-					logger.Info("Valid package.")
 				}
-
-				switch pack.OpCode {
-				case OpChatToOne:
-					c.server.single <- &pack
-				case OpChatToMuti:
-					fallthrough
-				case OpChatBroadcast:
-					c.server.multiple <- &pack
-				case OpFileUpReq:
-					ft, err := c.server.fileMan.NewFileTaskAndFileTicket(&pack)
-					if err != nil {
-						logger.Errorf("Make new file task error:%v", err.Error())
-						ReqAck := &Pack{
-							Sender:    MasterId,
-							Reciever:  pack.Sender,
-							TimeStamp: time.Now().UnixNano(),
-							OpCode:    OpFileUpReqAckErr,
-							Body:      []byte("You request is invail because of the server side."),
-						}
-						c.server.single <- ReqAck
-						break
-					}
-
-					logger.Tracef("Show new file task : { TaskId:%v, wFile:%v, rFile:%v, FileName:%v, FileSize:%v, Window:%v, Convergence:%v }",
-						ft.taskId,
-						ft.wFile,
-						ft.rFile,
-						ft.fileInfo.FileName,
-						ft.fileInfo.FileSize,
-						ft.window,
-						ft.convergence)
-
-					c.server.fileMan.addTask <- ft
-					ReqAck := &Pack{
-						Sender:    MasterId,
-						Reciever:  pack.Sender,
-						TimeStamp: time.Now().Unix(),
-						OpCode:    OpFileUpReqAckOk,
-						Body:      []byte(ft.taskId),
-					}
-					c.server.single <- ReqAck
-					c.server.single <- &pack // wraping file ticket
-				case OpFileDownReq:
-					logger.Info("Recieve download request.")
-					go c.downloadFile(&pack)
-				case OpFileUp: // file transfer surport only 1:1 now
-					var fs FileSeq
-					err := json.Unmarshal(pack.Body, &fs)
-					if err != nil {
-						logger.Errorf("[File up]:%v", err.Error())
-					}
-					c.server.fileMan.fileSeq <- &fs
-				default:
-					// no such operation, and send back an error message.
+				c.showFileTask(ft)
+				c.server.fileMan.addTask <- ft
+				c.server.toOne <- fTk
+				c.Response(OpFileUpReqAckOk, []byte(ft.taskId))
+			case OpFileDownReq:
+				logger.Info("Recieve download request.")
+				// If file not out date, send ACK to client side and start download.
+				//go c.downloadFile(&pack)
+				c.server.fileMan.fileDownLd <- &pack
+			case OpFileUp: // file transfer surport only 1:1 now
+				var fs FileSeq
+				err := json.Unmarshal(pack.Body, &fs)
+				if err != nil {
+					logger.Errorf("[File up]:%v", err.Error())
 				}
+				c.server.fileMan.fileUpLd <- &fs
+			default:
+				// no such operation, and send back an error message.
+				body := c.server.errorWrapper(ErrOperation, "You request the error operation")
+				c.Response(OpError, body)
 			}
 		}
 		//time.Sleep(time.Second)
@@ -196,6 +180,29 @@ func (c *connection) Listen() {
 
 	c.OfflinePush()
 	c.listenRead()
+}
+
+// Response to client whom request
+func (c *connection) Response(opcode int, body []byte) {
+	rp := &Pack{
+		Sender:    MasterId,
+		Reciever:  c.uid,
+		TimeStamp: time.Now().Unix(),
+		OpCode:    byte(opcode),
+		Body:      body,
+	}
+	c.server.toOne <- rp
+}
+
+func (c *connection) showFileTask(ft *FileTask) {
+	logger.Tracef("Show new file task : { TaskId:%v, wFile:%v, rFile:%v, FileName:%v, FileSize:%v, Window:%v, Convergence:%v }",
+		ft.taskId,
+		ft.wFile,
+		ft.rFile,
+		ft.fileInfo.FileName,
+		ft.fileInfo.FileSize,
+		ft.window,
+		ft.convergence)
 }
 
 func (c *connection) Conn() *websocket.Conn { // get client's connection
@@ -261,7 +268,7 @@ func (c *connection) OfflinePush() {
 			return
 		}
 		p := c.server.NewPack(sender, c.uid, timestamp, opcode, body)
-		c.server.single <- p
+		c.server.toOne <- p
 	}
 	logger.Tracef("Push total %v message.", count)
 	c.server.openDatabase("[OP:Clear OffMsg]")
@@ -276,65 +283,4 @@ func (c *connection) OfflinePush() {
 		logger.Error(err.Error())
 		return
 	}
-}
-
-func getFilePath(id1 uint64, id2 uint64, ts int64) string {
-	return "./repository/" + idToString(id1) + "/" + idToString(id2) + "/" + int64ToString(ts) + "/"
-}
-
-func (c *connection) downloadFile(pack *Pack) {
-	logger.Info("Begin downloading file.")
-	var ftk FileTicket
-	err := json.Unmarshal(pack.Body, &ftk)
-	if err != nil {
-		logger.Errorf("[File down request]:%v", &ftk)
-	}
-
-	ft := c.server.fileMan.fileTasks[ftk.TaskId]
-	if ft == nil {
-		logger.Error("No such file task.")
-		return
-	}
-	logger.Tracef("Show task:%v", ft)
-	ft.rFile, err = os.Open(ft.path)
-	if err != nil {
-		logger.Error(err.Error())
-	}
-
-	var num int
-	b := make([]byte, SeqLength)
-	for {
-		if ft.convergence < ft.window {
-			n, err := ft.rFile.Read(b)
-			if err != nil {
-				logger.Error(err.Error())
-			}
-			logger.Tracef("Read %v bytes:{%v}", n, string(b))
-			ft.convergence += n
-
-			fs := &FileSeq{
-				TaskId:     ftk.TaskId,
-				SeqNum:     num,
-				SeqSize:    n,
-				SeqContent: string(b[0:n]),
-			}
-			logger.Tracef("Show download sequence:%v", fs)
-			bd, err := json.Marshal(fs)
-			if err != nil {
-				logger.Error(err.Error())
-			}
-			p := c.server.NewPack(pack.Reciever, pack.Sender, c.server.getTimeStamp(), OpFileDown, bd)
-			logger.Tracef("Show package:%v", string(p.Body))
-			c.server.single <- p
-
-			num++
-		} else if ft.window < ft.fileInfo.FileSize {
-			runtime.Gosched()
-		} else {
-			logger.Infof("Download {%v} complete.", ft.fileInfo.FileName)
-			c.server.fileMan.delTask <- ft
-			return
-		}
-	}
-	logger.Info("Download end.")
 }

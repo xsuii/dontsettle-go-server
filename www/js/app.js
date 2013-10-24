@@ -1,4 +1,7 @@
-// app
+/*
+ 
+ */
+// Html5 filesystem 
 window.requestFileSystem = window.requestFileSystem || window.webkitRequestFileSystem;
 
 // app opcode
@@ -16,7 +19,10 @@ var OpChatToOne = 10
 var OpChatToMuti = 11
 var OpChatBroadcast = 12
 var OpFileUpReqAckOk = 13
-var OpFileUpReqAckErr = 14
+var OpError = 14
+
+// error code
+var ErrFileUpReqAck = 1
 
 // special id
 var NullId = 0
@@ -204,6 +210,7 @@ function addFileNode(file) {
 }
 
 // Use file taskId(the FileTask map's key,UUID) to decide which file to create/write
+
 function receiveFile(msg) {
 	fileSeq = JSON.parse(msg.Body);
 	fileName = FileTask[fileSeq.TaskId];
@@ -345,14 +352,31 @@ function onMessage(evt) {
 			console.log("Upload file ready.");
 			uploadFileInPiece(msg.Body);
 			break;
-		case OpFileUpReqAckErr:
-			alert(msg.Body.toString())
-			break;
 		case OpFileDown:
 			receiveFile(msg);
 			break;
+		case OpError:
+			console.log("Get error message.")
+			errorHandler(msg.Body);
+			break;
+		default:
+			console.log("Unknown message receive.");
 	}
 	// if login success, recieve string "0"; otherwise recieve "uid+username" which will store later
+}
+
+// handle the error response from server.
+
+function errorHandler(err) {
+	console.log(err);
+	err = JSON.parse(err);
+	switch (err.Code) {
+		case ErrFileUpReqAck:
+			alert("[Error:" + err.Code + "] " + err.Message);
+			break;
+		default:
+			console.log("Unknown error.")
+	}
 }
 
 /////////////////////////////////////////////////////////////////////

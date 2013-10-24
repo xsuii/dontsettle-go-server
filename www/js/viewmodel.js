@@ -37,7 +37,7 @@ function gameViewModel() {
 
     self.sendBox = ko.observable({
         sendMsg: "",
-        toOne: "",
+        toOne: "100002",
         toGroup: ""
     });
 
