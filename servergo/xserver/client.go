@@ -109,7 +109,8 @@ func (c *connection) listenRead() { // send to all
 
 			if err := c.server.checkPackValid(pack); err != nil {
 				logger.Error(err.Error())
-				c.server.masterPack(c, []byte("Back package!")) // [TODO]
+				body := c.server.errorWrapper(ErrBadPackage, "You send the invalid package.")
+				c.ResponseB(OpError, body)
 				break
 			} else {
 				logger.Info("Package is valid.")
@@ -122,34 +123,38 @@ func (c *connection) listenRead() { // send to all
 				fallthrough
 			case OpChatBroadcast:
 				c.server.toMuti <- &pack
-			case OpFileUpReq:
+			case OpFileUpldReq:
+				logger.Info("Server receive file upload request.")
 				ft, fTk, err := c.server.fileMan.NewFileTaskAndFileTicket(&pack)
 				if err != nil {
 					logger.Errorf("Make new file task error:%v", err.Error())
 					body := c.server.errorWrapper(ErrFileUpReqAck, "You request is invail because of the server side.")
-					c.Response(OpError, body)
+					c.ResponseB(OpError, body)
 					break
 				}
 				c.showFileTask(ft)
 				c.server.fileMan.addTask <- ft
 				c.server.toOne <- fTk
-				c.Response(OpFileUpReqAckOk, []byte(ft.taskId))
-			case OpFileDownReq:
+				c.ResponseS(OpFileUpldReqAckOk, ft.taskId)
+			case OpFileDownldReq:
 				logger.Info("Recieve download request.")
 				// If file not out date, send ACK to client side and start download.
 				//go c.downloadFile(&pack)
-				c.server.fileMan.fileDownLd <- &pack
-			case OpFileUp: // file transfer surport only 1:1 now
+				c.ResponseB(OpFileDownldReqAckOk, pack.Body)
+			case OpFileUpld: // file transfer surport only 1:1 now
 				var fs FileSeq
 				err := json.Unmarshal(pack.Body, &fs)
 				if err != nil {
 					logger.Errorf("[File up]:%v", err.Error())
 				}
 				c.server.fileMan.fileUpLd <- &fs
+			case OpFileDownld:
+				logger.Info("Start download.")
+				c.server.fileMan.fileDownLd <- string(pack.Body) // start download
 			default:
 				// no such operation, and send back an error message.
 				body := c.server.errorWrapper(ErrOperation, "You request the error operation")
-				c.Response(OpError, body)
+				c.ResponseB(OpError, body)
 			}
 		}
 		//time.Sleep(time.Second)
@@ -183,7 +188,18 @@ func (c *connection) Listen() {
 }
 
 // Response to client whom request
-func (c *connection) Response(opcode int, body []byte) {
+func (c *connection) ResponseS(opcode int, body string) {
+	rp := &Pack{
+		Sender:    MasterId,
+		Reciever:  c.uid,
+		TimeStamp: time.Now().Unix(),
+		OpCode:    byte(opcode),
+		Body:      []byte(body),
+	}
+	c.server.toOne <- rp
+}
+
+func (c *connection) ResponseB(opcode int, body []byte) {
 	rp := &Pack{
 		Sender:    MasterId,
 		Reciever:  c.uid,

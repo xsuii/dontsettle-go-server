@@ -14,25 +14,28 @@ var _ = time.Second
 
 const (
 	// operation code
-	OpNull           = 0
-	OpMaster         = 1 // this present master's message, include bad-package...
-	OpLogin          = 2
-	OpRegister       = 3
-	OpChat           = 4
-	OpFileTransfer   = 5
-	OpFileUp         = 6
-	OpFileDown       = 7
-	OpFileUpReq      = 8
-	OpFileDownReq    = 9
-	OpChatToOne      = 10
-	OpChatToMuti     = 11
-	OpChatBroadcast  = 12
-	OpFileUpReqAckOk = 13
-	OpError          = 14
+	OpNull               = 0
+	OpMaster             = 1 // this present master's message, include bad-package...
+	OpLogin              = 2
+	OpRegister           = 3
+	OpChat               = 4
+	OpFileTransfer       = 5
+	OpFileUpld           = 6
+	OpFileDownld         = 7
+	OpFileUpldReq        = 8
+	OpFileDownldReq      = 9
+	OpChatToOne          = 10
+	OpChatToMuti         = 11
+	OpChatBroadcast      = 12
+	OpFileUpldReqAckOk   = 13
+	OpError              = 14
+	OpFileTicket         = 15
+	OpFileDownldReqAckOk = 16
 
 	// error code
 	ErrFileUpReqAck = 1
 	ErrOperation    = 2
+	ErrBadPackage   = 3
 
 	// system id
 	NullId      = 0
@@ -218,11 +221,11 @@ func (s *Server) showPack(who string, act string, p Pack) {
 // check the validity of package
 func (s *Server) checkPackValid(p Pack) error {
 	logger.Info("Check package's valid.")
-	if p.Reciever != NullId &&
+	if !(p.Reciever != NullId &&
 		p.Sender != NullId &&
 		p.Body != nil &&
 		p.TimeStamp != 0 &&
-		p.OpCode != OpNull {
+		p.OpCode != OpNull) {
 		return ServerError{
 			"Receive bad package",
 		}

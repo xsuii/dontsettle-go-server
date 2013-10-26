@@ -12,7 +12,7 @@ import (
 var _ = time.Second
 
 const (
-	SeqLength = 10
+	SeqLength = 5
 )
 
 var _ = time.Second
@@ -45,6 +45,7 @@ type FileTask struct {
 	fileInfo    FileInfo
 	window      int // size of stored file pieces // window & convergence use for synchronous
 	convergence int // size of downed file pieces
+	receiver    uint64
 	// [TODO] addTime int
 }
 
@@ -57,7 +58,7 @@ type FileManager struct {
 	fileTasks  map[string]*FileTask // each task has a task id(FileId field in FileSeq Struct)
 	taskCount  int
 	fileUpLd   chan *FileSeq
-	fileDownLd chan *Pack
+	fileDownLd chan string
 	syncCh     chan bool
 }
 
@@ -69,7 +70,7 @@ func NewFileManager(s *Server) *FileManager {
 	fileTasks := make(map[string]*FileTask)
 	taskCount := 0
 	fileUpLd := make(chan *FileSeq)
-	fileDownLd := make(chan *Pack)
+	fileDownLd := make(chan string)
 	syncCh := make(chan bool)
 	return &FileManager{
 		server,
@@ -134,7 +135,7 @@ func (fm *FileManager) FileRoute() {
 				logger.Warn("You operate on a nil task.")
 			}
 			logger.Debug("Write pieces done.")
-			time.Sleep(2 * time.Second)
+			time.Sleep(1 * time.Second)
 		case fd := <-fm.fileDownLd:
 			go fm.downloadFile(fd)
 		}
@@ -167,6 +168,7 @@ func (fm *FileManager) NewFileTaskAndFileTicket(pack *Pack) (*FileTask, *Pack, e
 		return nil, nil, err
 	}
 	pack.Body = bd // change the body, which add file task id in it
+	pack.OpCode = OpFileTicket
 
 	return &FileTask{
 		taskId:      ti,
@@ -176,6 +178,7 @@ func (fm *FileManager) NewFileTaskAndFileTicket(pack *Pack) (*FileTask, *Pack, e
 		fileInfo:    fInfo,
 		window:      0,
 		convergence: 0,
+		receiver:    pack.Reciever,
 	}, pack, nil
 }
 
@@ -197,15 +200,11 @@ func (fm *FileManager) CreateFile(dirPath string, fi FileInfo) (*os.File, error)
 	return f, err
 }
 
-func (fm *FileManager) downloadFile(pack *Pack) {
+func (fm *FileManager) downloadFile(tId string) {
+	var err error
 	logger.Info("Begin downloading file.")
-	var ftk FileTicket
-	err := json.Unmarshal(pack.Body, &ftk)
-	if err != nil {
-		logger.Errorf("[File down request]:%v", &ftk)
-	}
 
-	ft := fm.fileTasks[ftk.TaskId]
+	ft := fm.fileTasks[tId]
 	if ft == nil {
 		logger.Error("No such file task.")
 		return
@@ -228,7 +227,7 @@ func (fm *FileManager) downloadFile(pack *Pack) {
 			ft.convergence += n
 
 			fs := &FileSeq{
-				TaskId:     ftk.TaskId,
+				TaskId:     tId,
 				SeqNum:     num,
 				SeqSize:    n,
 				SeqContent: string(b[0:n]),
@@ -238,7 +237,7 @@ func (fm *FileManager) downloadFile(pack *Pack) {
 			if err != nil {
 				logger.Error(err.Error())
 			}
-			p := fm.server.NewPack(pack.Reciever, pack.Sender, getTimeStamp(), OpFileDown, bd)
+			p := fm.server.NewPack(MasterId, ft.receiver, getTimeStamp(), OpFileDownld, bd)
 			logger.Tracef("Show package:%v", string(p.Body))
 			fm.server.toOne <- p
 
