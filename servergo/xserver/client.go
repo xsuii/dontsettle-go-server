@@ -105,7 +105,7 @@ func (c *connection) listenRead() { // send to all
 				logger.Error("Package receive error :", err.Error())
 				break
 			}
-			c.server.showPack("server", "recieve", pack)
+			c.server.showPack("server", "receive", pack)
 
 			if err := c.server.checkPackValid(pack); err != nil {
 				logger.Error(err.Error())

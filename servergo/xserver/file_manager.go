@@ -10,14 +10,15 @@ import (
 )
 
 var _ = time.Second
-
-const (
-	SeqLength = 5
-)
-
 var _ = time.Second
 var _ = fmt.Printf
 var _ = runtime.GOOS
+
+const (
+	SeqLength = 5
+
+	Delay = 0
+)
 
 type FileInfo struct {
 	FileName string
@@ -92,7 +93,7 @@ func (fm *FileManager) FileRoute() {
 			logger.Debug("Add new file task.")
 			fm.fileTasks[at.taskId] = at
 
-			// {store to database} //
+			// [TODO]{store to database} //
 
 			logger.Tracef("Show task list:")
 			for _, ft := range fm.fileTasks {
@@ -129,13 +130,13 @@ func (fm *FileManager) FileRoute() {
 					if err != nil {
 						logger.Error("Close write-file error:", err.Error())
 					}
+					logger.Infof("File {%v} upload done.", ft.fileInfo.FileName)
 				}
 			} else {
 				// send to client
 				logger.Warn("You operate on a nil task.")
 			}
 			logger.Debug("Write pieces done.")
-			time.Sleep(1 * time.Second)
 		case fd := <-fm.fileDownLd:
 			go fm.downloadFile(fd)
 		}
@@ -222,6 +223,7 @@ func (fm *FileManager) downloadFile(tId string) {
 			n, err := ft.rFile.Read(b)
 			if err != nil {
 				logger.Error(err.Error())
+				// do something
 			}
 			logger.Tracef("Read %v bytes:{%v}", n, string(b[:n]))
 			ft.convergence += n

@@ -33,6 +33,7 @@ func loadLogComfig() {
 var addr = flag.String("addr", ":8001", "http service address") // default listening port is 8000
 
 func main() {
+	runtime.GOMAXPROCS(2)
 	defer xserver.FlushLog()
 	defer mainlog.Flush()
 	loadLogComfig()

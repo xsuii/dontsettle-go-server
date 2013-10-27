@@ -129,50 +129,6 @@ function upldFileReq() {
 	p.send();
 }
 
-function uploadFileInPiece(taskId) {
-	console.log("Start sending file in pieces.");
-	var f = document.getElementById("file");
-	var sendTo = document.getElementById("one").value;
-	var file = f.files[0];
-	var fName = file.name;
-	if (sendTo == null || sendTo == "") {
-		document.getElementById("chatError").innerHTML = "Please fill up the one you send to";
-		return;
-	}
-
-	var reader = new FileReader();
-	reader.onloadend = function(evt) {
-		var content = evt.target.result;
-		console.log(content.slice(0, 10));
-
-		var p = new Package(sendTo, "", OpFileUpld) // send file title
-		var fileSequence = {
-			TaskId: taskId
-		};
-		console.log("show head 100:", content.slice(0, 100));
-
-		console.log("loop:", file.size / SEQ_LENGTH);
-		for (var i = 0; i < Math.floor(file.size / SEQ_LENGTH); i++) {
-			fileSequence["SeqNum"] = i;
-			fileSequence["SeqContent"] = content.slice(i * SEQ_LENGTH, (i + 1) * SEQ_LENGTH);
-			fileSequence["SeqSize"] = SEQ_LENGTH;
-			console.log(fileSequence);
-			p.Body = window.btoa(JSON.stringify(fileSequence));
-			p.send();
-		}
-		if (file.size % SEQ_LENGTH > 0) {
-			fileSequence["SeqNum"] = i;
-			fileSequence["SeqContent"] = content.slice(i * SEQ_LENGTH, i * SEQ_LENGTH + file.size % SEQ_LENGTH);
-			fileSequence["SeqSize"] = file.size % SEQ_LENGTH;
-			console.log(fileSequence);
-			p.Body = window.btoa(JSON.stringify(fileSequence));
-			p.send();
-		};
-	};
-	reader.readAsText(file);
-	console.log("upload file end.")
-}
-
 function addFileTask(file) {
 	console.log("add file task.");
 	var jTicket = JSON.parse(file.Body);
@@ -188,7 +144,6 @@ function addFileTask(file) {
 	pre.style.padding = "5px";
 	pre.setAttribute("fileTicket", file.Body);
 	pre.onclick = function() { // send download file request
-		//var body = this.getAttribute("fileTicket");
 		var r = confirm("sure download? " + jTicket.FileInfo.FileName + jTicket.FileInfo.FileSize);
 		if (r == true) {
 			var p = new Package(
@@ -205,6 +160,63 @@ function addFileTask(file) {
 
 	db.transaction(addHistory, errorCB, successCB);
 }
+
+function uploadFileInPiece(taskId) {
+	console.log("Start sending file in pieces.");
+	var f = document.getElementById("file");
+	var sendTo = document.getElementById("one").value;
+	var file = f.files[0];
+	var fName = file.name;
+	if (sendTo == null || sendTo == "") {
+		document.getElementById("chatError").innerHTML = "Please fill up the one you send to";
+		return;
+	}
+
+	var reader = new FileReader();
+	reader.onloadend = function(evt) {
+		var content = evt.target.result;
+		console.log(content.slice(0, 10));
+		console.log("show head 100:", content.slice(0, 100));
+
+		for (var i = 0; i < Math.floor(file.size / SEQ_LENGTH); i++) {
+			var fileSequence = {
+				TaskId: taskId,
+				SeqNum: i,
+				SeqContent: content.slice(i * SEQ_LENGTH, (i + 1) * SEQ_LENGTH),
+				SeqSize: SEQ_LENGTH
+			};
+			console.log("Show Seq:", fileSequence);
+			var p = new Package(sendTo, JSON.stringify(fileSequence), OpFileUpld) // send file title
+			setTimeout((function(pkg) {
+				return function() {
+					console.log("Show Pack:", pkg);
+					console.log("Show Seq:", window.atob(pkg.Body));
+					pkg.send();
+				}
+			})(p), i * 1000);
+		}
+		if (file.size % SEQ_LENGTH > 0) {
+			var fileSequence = {
+				TaskId: taskId,
+				SeqNum: i,
+				SeqContent: content.slice(i * SEQ_LENGTH, i * SEQ_LENGTH + file.size % SEQ_LENGTH),
+				SeqSize: file.size % SEQ_LENGTH
+			};
+			console.log("Show Seq:", fileSequence);
+			var p = new Package(sendTo, JSON.stringify(fileSequence), OpFileUpld) // send file title
+			setTimeout((function(pkg) {
+				return function() {
+					console.log("Show pack:", window.atob(pkg.Body));
+					pkg.send();
+				}
+			})(p), i * 1000);
+		};
+	};
+	reader.readAsText(file);
+	console.log("upload file end.")
+}
+
+// [TODO] check whether file exsist, if is, then throw a message asking changing
 
 function createFile(taskId) {
 	console.log("Start create file(name&taskid):", FileTask[taskId].FileInfo.FileName, taskId);
@@ -230,6 +242,7 @@ function createFile(taskId) {
 }
 
 // Use file taskId(the FileTask map's key,UUID) to decide which file to create/write
+// write asynchronous
 
 function writeFile(jFileSeq) {
 	var fileSeq = JSON.parse(jFileSeq);
@@ -421,20 +434,20 @@ function doSend(message) {
 
 function Package(reciever, body, opcode) {
 	self = this;
-	self.Sender = Number(_userId_);
-	self.Reciever = Number(reciever);
-	self.Body = window.btoa(body); // base64 encode; [bug:chinese unsurport]
-	self.TimeStamp = Math.round(Date.now() / 1000); // Unix timestamp
-	self.OpCode = opcode;
+	this.Sender = Number(_userId_);
+	this.Reciever = Number(reciever);
+	this.Body = window.btoa(body); // base64 encode; [bug:chinese unsurport]
+	this.TimeStamp = Math.round(Date.now() / 1000); // Unix timestamp
+	this.OpCode = opcode;
 
-	self.send = function() {
+	this.send = function() {
 		console.log("send package");
 		doSend(JSON.stringify({
 			"Sender": self.Sender,
-			"Reciever": self.Reciever,
-			"Body": self.Body,
-			"TimeStamp": self.TimeStamp,
-			"OpCode": self.OpCode,
+			"Reciever": Number(reciever),
+			"Body": window.btoa(body),
+			"TimeStamp": self.TimeStamp, // [TODO]this would be a bug.
+			"OpCode": opcode,
 		}));
 	}
 }
@@ -445,6 +458,10 @@ function UnPack(pack) {
 	var p = JSON.parse(pack);
 	p.Body = window.atob(p.Body); // base64 decode(should consider client-end surport)
 	return p
+}
+
+function loginError(str) {
+	console.log("[Login Error]", str);
 }
 
 function chatError(err) {

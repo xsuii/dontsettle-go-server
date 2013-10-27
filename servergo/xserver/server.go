@@ -43,6 +43,26 @@ const (
 	BroadCastId = 10001 //
 )
 
+var Operation = map[byte]string{
+	0:  "OpNull",
+	1:  "OpMaster",
+	2:  "OpLogin",
+	3:  "OpRegister",
+	4:  "OpChat",
+	5:  "OpFileTransfer",
+	6:  "OpFileUpld",
+	7:  "OpFileDownld",
+	8:  "OpFileUpldReq",
+	9:  "OpFileDownldReq",
+	10: "OpChatToOne",
+	11: "OpChatToMulti",
+	12: "OpChatBroadcast",
+	13: "OpFileUpldReqAckOk",
+	14: "OpError",
+	15: "OpFileTicket",
+	16: "OpFileDownldReqAckOk",
+}
+
 type IdType uint64 // use this way to achieve easy-extension
 
 type ResponseError struct {
@@ -208,13 +228,23 @@ func (s *Server) NewPack(sender uint64, Reciever uint64, timestamp int64, opcode
 
 // showing a pack
 func (s *Server) showPack(who string, act string, p Pack) {
-	logger.Tracef("%v %v \x1b[38;5;200m{ Sender:%v, Reciever:%v, TimeStamp:%v, OpCode:%v, Body:%v }\x1b[0m",
+	var prefix, suffix string
+	switch act { // color print
+	case "receive":
+		prefix = "\x1b[38;5;167m"
+		suffix = "\x1b[0m"
+	case "send":
+		prefix = "\x1b[38;5;178m"
+		suffix = "\x1b[0m"
+	}
+
+	logger.Tracef("%v "+prefix+"%v"+suffix+" { Sender:%v, Reciever:%v, TimeStamp:%v, "+prefix+"OpCode:%v, Body:%v"+suffix+" }",
 		who,
 		act,
 		p.Sender,
 		p.Reciever,
 		p.TimeStamp,
-		p.OpCode,
+		Operation[p.OpCode],
 		string(p.Body))
 }
 
