@@ -19,26 +19,6 @@ type LoginInfo struct {
 	Userpasswd string
 }
 
-type File struct {
-	FileName string
-	Body     []byte
-}
-
-type FileSequence struct {
-	FileName   string
-	FileSize   int
-	FileSeq    int
-	SeqContent string
-	SeqSize    int
-}
-
-type Ticket struct {
-	FSender   uint64
-	FReciever uint64
-	FileName  string
-	TimeStamp int64
-}
-
 type connection struct {
 	uid    uint64          // connection id
 	ws     *websocket.Conn // connection socket
@@ -136,11 +116,6 @@ func (c *connection) listenRead() { // send to all
 				c.server.fileMan.addTask <- ft
 				c.server.toOne <- fTk
 				c.ResponseS(OpFileUpldReqAckOk, ft.taskId)
-			case OpFileDownldReq:
-				logger.Info("Recieve download request.")
-				// If file not out date, send ACK to client side and start download.
-				//go c.downloadFile(&pack)
-				c.ResponseB(OpFileDownldReqAckOk, pack.Body)
 			case OpFileUpld: // file transfer surport only 1:1 now
 				var fs FileSeq
 				err := json.Unmarshal(pack.Body, &fs)
@@ -148,6 +123,20 @@ func (c *connection) listenRead() { // send to all
 					logger.Errorf("[File up]:%v", err.Error())
 				}
 				c.server.fileMan.fileUpLd <- &fs
+			case OpFileUpldDone:
+				ft := c.server.fileMan.fileTasks[string(pack.Body)]
+				if ft == nil {
+					logger.Warn("No this task.")
+					continue
+				} else {
+					c.server.fileMan.StoreTask(ft)
+					c.server.fileMan.delTask <- ft
+				}
+			case OpFileDownldReq:
+				logger.Info("Recieve download request.")
+				// If file not out date, send ACK to client side and start download.
+				//go c.downloadFile(&pack)
+				c.ResponseB(OpFileDownldReqAckOk, pack.Body)
 			case OpFileDownld:
 				logger.Info("Start download.")
 				c.server.fileMan.fileDownLd <- string(pack.Body) // start download

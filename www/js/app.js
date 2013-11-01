@@ -22,7 +22,7 @@ OpFileUpldReqAckOk = 13
 OpError = 14
 OpFileTicket = 15
 OpFileDownldReqAckOk = 16
-
+OpFileUpldDone = 17
 
 // error code
 ErrFileUpReqAck = 1
@@ -161,6 +161,13 @@ function addFileTask(file) {
 	db.transaction(addHistory, errorCB, successCB);
 }
 
+
+// [TODO] Actually this should stop sending when 
+// the network problem or wrong sending pointing by
+// server or client itself . And most important 
+// thing is this operation is under control. It should
+// not happen.
+
 function uploadFileInPiece(taskId) {
 	console.log("Start sending file in pieces.");
 	var f = document.getElementById("file");
@@ -211,6 +218,14 @@ function uploadFileInPiece(taskId) {
 				}
 			})(p), i * 1000);
 		};
+		// download end
+		var p = new Package(sendTo, taskId, OpFileUpldDone)
+		setTimeout((function(pkg) {
+			return function() {
+				console.log("Show pack:", window.atob(pkg.Body));
+				pkg.send();
+			}
+		})(p), (i + 1) * 1000);
 	};
 	reader.readAsText(file);
 	console.log("upload file end.")

@@ -10,7 +10,6 @@ import (
 )
 
 var _ = time.Second
-var _ = time.Second
 var _ = fmt.Printf
 var _ = runtime.GOOS
 
@@ -18,6 +17,10 @@ const (
 	SeqLength = 5
 
 	Delay = 0
+
+	Day          = 24 * time.Hour
+	Week         = 7 * Day
+	FileDeadline = 10 * time.Minute // [Conf]
 )
 
 type FileInfo struct {
@@ -36,18 +39,27 @@ type FileSeq struct {
 	SeqNum     int
 	SeqContent string
 	SeqSize    int
+	// CheckSum string // [TODO] md5sum or something
+}
+
+type FileSync struct {
+	window      int
+	convergence int
+	downld      bool
 }
 
 type FileTask struct {
 	taskId      string // it presentate a UUID(e.g. 4b156b8c-1751-4382-a8dd-ba2779b087e0)
-	path        string
+	dirPath     string
 	rFile       *os.File
 	wFile       *os.File
-	fileInfo    FileInfo
+	fileInfo    *FileInfo
+	sender      uint64
+	receiver    uint64
+	sendTime    int64
 	window      int // size of stored file pieces // window & convergence use for synchronous
 	convergence int // size of downed file pieces
-	receiver    uint64
-	// [TODO] addTime int
+	downld      bool
 }
 
 // [TODO] The task list should store into data base, in order
@@ -97,23 +109,22 @@ func (fm *FileManager) FileRoute() {
 
 			logger.Tracef("Show task list:")
 			for _, ft := range fm.fileTasks {
-				logger.Tracef("Task list:{ TaskId:%v, FileInfo:%v, Window:%v, Convergence:%v }",
+				logger.Tracef("Task list:{ TaskId:%v, FileInfo:%v, Window:%v, Convergence:%v, Downld:%v }",
 					ft.taskId,
 					ft.fileInfo,
 					ft.window,
-					ft.convergence)
+					ft.convergence,
+					ft.downld)
 			}
 
 			logger.Debug("Add task done.")
 		case dt := <-fm.delTask: // del file store task
 			// [TODO] Actually, it should not delete too soon, for
 			// re-download. Instead, set some deadline.
-			logger.Infof("Del file task:{%v}", dt.taskId)
-			err := dt.rFile.Close()
-			if err != nil {
-				logger.Error("Close read-file error:", err.Error())
+			if !dt.downld { // someone is downloading
+				logger.Infof("Del file task:{%v}", dt.taskId)
+				delete(fm.fileTasks, dt.taskId)
 			}
-			delete(fm.fileTasks, dt.taskId)
 		case fs := <-fm.fileUpLd:
 			ft := fm.fileTasks[fs.TaskId]
 			if ft != nil {
@@ -173,16 +184,23 @@ func (fm *FileManager) NewFileTaskAndFileTicket(pack *Pack) (*FileTask, *Pack, e
 
 	return &FileTask{
 		taskId:      ti,
-		path:        dirPath + fInfo.FileName,
+		dirPath:     dirPath,
 		rFile:       nil,
 		wFile:       f,
-		fileInfo:    fInfo,
+		fileInfo:    &fInfo,
+		sender:      pack.Sender,
+		receiver:    pack.Reciever,
+		sendTime:    pack.TimeStamp,
 		window:      0,
 		convergence: 0,
-		receiver:    pack.Reciever,
+		downld:      false,
 	}, pack, nil
 }
 
+// Path condition
+// 1. Unique (in order not to make conflict)
+// 2. Connection with time (set deadline)
+// 3. Easy to delete when in deadline
 func getFilePath(id1 uint64, id2 uint64, ts int64) string {
 	return "./repository/" + idToString(id1) + "/" + idToString(id2) + "/" + int64ToString(ts) + "/"
 }
@@ -203,38 +221,88 @@ func (fm *FileManager) CreateFile(dirPath string, fi FileInfo) (*os.File, error)
 
 func (fm *FileManager) downloadFile(tId string) {
 	var err error
+	var ft *FileTask
+	b := make([]byte, SeqLength)
 	logger.Info("Begin downloading file.")
 
-	ft := fm.fileTasks[tId]
+	ft = fm.fileTasks[tId]
 	if ft == nil {
-		logger.Error("No such file task.")
-		return
-	}
-	logger.Tracef("Show task:%v", ft)
-	ft.rFile, err = os.Open(ft.path)
-	if err != nil {
-		logger.Error(err.Error())
-	}
+		var (
+			effect   int
+			dirPath  string
+			sender   uint64
+			receiver uint64
+			fileName string
+			fileSize int
+		)
 
-	var num int
-	b := make([]byte, SeqLength)
-	for {
-		if ft.convergence < ft.window {
+		fm.server.openDatabase("[Donwload File]")
+		stmt, err := fm.server.db.Prepare("SELECT dirPath, sender, receiver, fileName, fileSize FROM file_list WHERE taskId=?")
+		if err != nil {
+			logger.Error(err.Error())
+		}
+
+		rows, err := stmt.Query(tId)
+		if err != nil {
+			logger.Error(err.Error())
+		}
+
+		for rows.Next() {
+			effect++
+			err := rows.Scan(&dirPath, &sender, &receiver, &fileName, &fileSize)
+			if err != nil {
+				logger.Error(err.Error())
+			}
+		}
+
+		fInfo := &FileInfo{
+			FileName: fileName,
+			FileSize: fileSize,
+		}
+		if effect > 0 {
+			ft = &FileTask{
+				taskId:      tId,
+				dirPath:     dirPath,
+				rFile:       nil,
+				wFile:       nil,
+				fileInfo:    fInfo,
+				sender:      sender,
+				receiver:    receiver,
+				window:      0,
+				convergence: 0,
+				downld:      true,
+			}
+
+			ft.rFile, err = os.Open(ft.dirPath + ft.fileInfo.FileName)
+			if err != nil {
+				logger.Error(err.Error())
+			}
+			fm.addTask <- ft
+
+		} else {
+			logger.Info("No such file task.")
+
+			// response
+
+			return
+		}
+		fm.server.closeDatabase("[Download file]")
+		for i := 0; ft.window < ft.fileInfo.FileSize; i++ {
 			n, err := ft.rFile.Read(b)
 			if err != nil {
 				logger.Error(err.Error())
 				// do something
 			}
-			logger.Tracef("Read %v bytes:{%v}", n, string(b[:n]))
-			ft.convergence += n
+			ft.window += n
 
 			fs := &FileSeq{
 				TaskId:     tId,
-				SeqNum:     num,
+				SeqNum:     i,
 				SeqSize:    n,
 				SeqContent: string(b[0:n]),
 			}
 			logger.Tracef("Show download sequence:%v", fs)
+
 			bd, err := json.Marshal(fs)
 			if err != nil {
 				logger.Error(err.Error())
@@ -242,15 +310,127 @@ func (fm *FileManager) downloadFile(tId string) {
 			p := fm.server.NewPack(MasterId, ft.receiver, getTimeStamp(), OpFileDownld, bd)
 			logger.Tracef("Show package:%v", string(p.Body))
 			fm.server.toOne <- p
+		}
+		ft.downld = false
+		err = ft.rFile.Close() // window == fileSize
+		if err != nil {
+			logger.Error("Close write-file error:", err.Error())
+		}
+		fm.delTask <- ft
+	} else {
+		logger.Tracef("Show task:%v", ft)
+		ft.rFile, err = os.Open(ft.dirPath)
+		if err != nil {
+			logger.Error(err.Error())
+		}
+		ft.downld = true
 
-			num++
-		} else if ft.window < ft.fileInfo.FileSize {
-			runtime.Gosched()
-		} else {
-			logger.Infof("Download {%v} complete.", ft.fileInfo.FileName)
-			fm.delTask <- ft
-			return
+		for i := 0; ; i++ {
+			if ft.convergence < ft.window {
+				n, err := ft.rFile.Read(b)
+				if err != nil {
+					logger.Error(err.Error())
+					// do something
+				}
+				logger.Tracef("Read %v bytes:{%v}", n, string(b[:n]))
+				ft.convergence += n
+
+				fs := &FileSeq{
+					TaskId:     tId,
+					SeqNum:     i,
+					SeqSize:    n,
+					SeqContent: string(b[0:n]),
+				}
+				logger.Tracef("Show download sequence:%v", fs)
+				bd, err := json.Marshal(fs)
+				if err != nil {
+					logger.Error(err.Error())
+				}
+				p := fm.server.NewPack(MasterId, ft.receiver, getTimeStamp(), OpFileDownld, bd)
+				logger.Tracef("Show package:%v", string(p.Body))
+				fm.server.toOne <- p
+			} else if ft.window < ft.fileInfo.FileSize {
+				runtime.Gosched()
+			} else {
+				logger.Infof("Download {%v} complete.", ft.fileInfo.FileName)
+				err := ft.rFile.Close() // window == fileSize
+				if err != nil {
+					logger.Error("Close write-file error:", err.Error())
+				}
+				fm.delTask <- ft
+				return
+			}
 		}
 	}
 	logger.Info("Download end.")
+}
+
+func (fm *FileManager) StoreTask(ft *FileTask) {
+	fm.server.openDatabase("[Store Task]")
+	defer func() {
+		fm.server.closeDatabase("[Store Task]")
+	}()
+
+	stmt, err := fm.server.db.Prepare("INSERT file_list SET sendTime=?, taskId=?, dirPath=?, sender=?, receiver=?, fileName=?, fileSize=?")
+	if err != nil {
+		logger.Error(err.Error())
+		return
+	}
+
+	_, err = stmt.Exec(ft.sendTime, ft.taskId, ft.dirPath, ft.sender, ft.receiver, ft.fileInfo.FileName, ft.fileInfo.FileSize)
+	if err != nil {
+		logger.Error(err.Error())
+	}
+}
+
+// Deadline of the file
+func (fm *FileManager) Deadline() {
+	logger.Info("Deadline counting.")
+
+	for {
+		var (
+			taskId   string
+			dirPath  string
+			sendTime int
+		)
+		fm.server.openDatabase("[Deadline]")
+		var line = time.Now().Unix() - int64(FileDeadline/time.Second)
+		logger.Tracef("Line : %v", line)
+
+		stmt, err := fm.server.db.Prepare("SELECT taskId, dirPath, sendTime FROM file_list WHERE sendTime<?")
+		if err != nil {
+			logger.Error(err.Error())
+		}
+
+		rows, err := stmt.Query(line)
+		if err != nil {
+			logger.Error(err.Error())
+		}
+
+		for rows.Next() {
+			err = rows.Scan(&taskId, &dirPath, &sendTime)
+			if err != nil {
+				logger.Error(err.Error())
+			}
+			err = os.RemoveAll(dirPath)
+			if err != nil {
+				logger.Error(err.Error())
+			}
+
+			logger.Debugf("Remove %v.", dirPath)
+
+			stmt, err = fm.server.db.Prepare("DELETE FROM file_list WHERE taskId=?")
+			if err != nil {
+				logger.Error(err.Error())
+			}
+
+			_, err = stmt.Exec(taskId)
+			if err != nil {
+				logger.Error(err.Error())
+			}
+		}
+
+		fm.server.closeDatabase("[Deadline]")
+		time.Sleep(5 * time.Second)
+	}
 }

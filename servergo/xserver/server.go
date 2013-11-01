@@ -31,6 +31,7 @@ const (
 	OpError              = 14
 	OpFileTicket         = 15
 	OpFileDownldReqAckOk = 16
+	OpFileUpldDone       = 17
 
 	// error code
 	ErrFileUpReqAck = 1
@@ -43,24 +44,25 @@ const (
 	BroadCastId = 10001 //
 )
 
-var Operation = map[byte]string{
-	0:  "OpNull",
-	1:  "OpMaster",
-	2:  "OpLogin",
-	3:  "OpRegister",
-	4:  "OpChat",
-	5:  "OpFileTransfer",
-	6:  "OpFileUpld",
-	7:  "OpFileDownld",
-	8:  "OpFileUpldReq",
-	9:  "OpFileDownldReq",
-	10: "OpChatToOne",
-	11: "OpChatToMulti",
-	12: "OpChatBroadcast",
-	13: "OpFileUpldReqAckOk",
-	14: "OpError",
-	15: "OpFileTicket",
-	16: "OpFileDownldReqAckOk",
+var Operation = map[byte]string{ // for better debug
+	OpNull:               "OpNull",
+	OpMaster:             "OpMaster",
+	OpLogin:              "OpLogin",
+	OpRegister:           "OpRegister",
+	OpChat:               "OpChat",
+	OpFileTransfer:       "OpFileTransfer",
+	OpFileUpld:           "OpFileUpld",
+	OpFileDownld:         "OpFileDownld",
+	OpFileUpldReq:        "OpFileUpldReq",
+	OpFileDownldReq:      "OpFileDownldReq",
+	OpChatToOne:          "OpChatToOne",
+	OpChatToMuti:         "OpChatToMuti",
+	OpChatBroadcast:      "OpChatBroadcast",
+	OpFileUpldReqAckOk:   "OpFileUpldReqAckOk",
+	OpError:              "OpError",
+	OpFileTicket:         "OpFileTicket",
+	OpFileDownldReqAckOk: "OpFileDownldReqAckOk",
+	OpFileUpldDone:       "OpFileUpldDone",
 }
 
 type IdType uint64 // use this way to achieve easy-extension
@@ -353,6 +355,7 @@ func (s *Server) Listen() {
 	logger.Info("Server Listening.")
 
 	go s.fileMan.FileRoute()
+	go s.fileMan.Deadline()
 
 	// create server handler
 	s.clientHandler()
