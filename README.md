@@ -4,7 +4,7 @@ dontsettle-go-server
 This is a server write by go which build for "2013 summer's android game develope".
 
 ### Installation
-go get -u github.com/xsuii/dontsettle-go-server
+	go get -u github.com/xsuii/dontsettle-go-server
 		go get -u github.com/go-sql-driver/mysql
 		go get -u github.com/cihub/seelog
 
