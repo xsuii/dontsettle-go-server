@@ -1,3 +1,8 @@
+// Copyright 2013 xsuii. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+//
 package xserver
 
 import (
@@ -13,6 +18,7 @@ import (
 
 var _ = os.Mkdir
 var _ = runtime.GOOS
+var _ = strconv.IntSize
 
 type LoginInfo struct {
 	Username   string
@@ -25,9 +31,19 @@ type connection struct {
 	server *Server         // the server was connected
 	send   chan *Pack      // message channel
 	doneCh chan bool
-	syncCh chan bool
 }
 
+func (c *connection) Listen() {
+	logger.Debug("client listening")
+	go c.listenWrite()
+
+	//{ user data push or update }//
+
+	c.OfflinePush()
+	c.listenRead()
+}
+
+// Create a new client including to valid identify that receive from connection
 func NewClient(ws *websocket.Conn, server *Server) *connection {
 	var lgif LoginInfo
 
@@ -60,15 +76,16 @@ func NewClient(ws *websocket.Conn, server *Server) *connection {
 				server: server,
 				send:   make(chan *Pack),
 				doneCh: make(chan bool),
-				syncCh: make(chan bool)}
+			}
 		}
 	}
 }
 
+// This present as a package router. It forward package which recieve from
+// client side, and decide by 'OpCode' in package field.
 func (c *connection) listenRead() { // send to all
 	logger.Debug("listening read")
 	for {
-		//time.Sleep(time.Second)
 		var pack Pack
 		select {
 		case <-c.doneCh:
@@ -150,6 +167,7 @@ func (c *connection) listenRead() { // send to all
 	}
 }
 
+// Send message to dstination client.
 func (c *connection) listenWrite() {
 	logger.Debug("listening write")
 	for {
@@ -166,17 +184,7 @@ func (c *connection) listenWrite() {
 	}
 }
 
-func (c *connection) Listen() {
-	logger.Debug("client listening")
-	go c.listenWrite()
-
-	//{ user data push or update }//
-
-	c.OfflinePush()
-	c.listenRead()
-}
-
-// Response to client whom request
+// Response to client whom request, accepting 'string' type body field.
 func (c *connection) ResponseS(opcode int, body string) {
 	rp := &Pack{
 		Sender:    MasterId,
@@ -188,6 +196,7 @@ func (c *connection) ResponseS(opcode int, body string) {
 	c.server.toOne <- rp
 }
 
+// Response to client whom request, accepting 'bytes' type body field.
 func (c *connection) ResponseB(opcode int, body []byte) {
 	rp := &Pack{
 		Sender:    MasterId,
@@ -199,6 +208,7 @@ func (c *connection) ResponseB(opcode int, body []byte) {
 	c.server.toOne <- rp
 }
 
+// Show detail of a file task in human readable format.
 func (c *connection) showFileTask(ft *FileTask) {
 	logger.Tracef("Show new file task : { TaskId:%v, wFile:%v, rFile:%v, FileName:%v, FileSize:%v, Window:%v, Convergence:%v }",
 		ft.taskId,
@@ -208,10 +218,6 @@ func (c *connection) showFileTask(ft *FileTask) {
 		ft.fileInfo.FileSize,
 		ft.window,
 		ft.convergence)
-}
-
-func (c *connection) Conn() *websocket.Conn { // get client's connection
-	return c.ws
 }
 
 func (c *connection) Write(pack *Pack) {
@@ -227,16 +233,7 @@ func (c *connection) Done() {
 	c.doneCh <- true
 }
 
-// do sync job assciate with Sync()
-func (c *connection) DoneSync() {
-	c.syncCh <- true
-}
-
-// do sync job assciate with DoneSync()
-func (c *connection) Sync() {
-	<-c.syncCh
-}
-
+// This function will push offline message when after user login
 // [TODO] Just push the latest n message at the login, push more when the client ask.
 func (c *connection) OfflinePush() {
 	logger.Debug("Start offline message push.")

@@ -445,8 +445,6 @@ function doSend(message) {
 	websocket.send(message);
 }
 
-// pack message(Object)
-
 function Package(reciever, body, opcode) {
 	self = this;
 	this.Sender = Number(_userId_);

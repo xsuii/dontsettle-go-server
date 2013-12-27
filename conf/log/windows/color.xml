@@ -1,6 +1,7 @@
 <!--
 	On windows, it need to use ansicon to access the escape sequence
 	ansicon(github):https://github.com/adoxa/ansicon
+					http://adoxa.hostmyway.net/ansicon(with bin)
 	* ANSI : http://en.wikipedia.org/wiki/ANSI_escape_code
 	* color pad : http://en.wikipedia.org/wiki/ANSI_escape_code#Colors
 -->

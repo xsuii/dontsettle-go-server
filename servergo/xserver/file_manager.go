@@ -1,3 +1,8 @@
+// Copyright 2013 xsuii. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+//
 package xserver
 
 import (
@@ -13,10 +18,11 @@ var _ = time.Second
 var _ = fmt.Printf
 var _ = runtime.GOOS
 
-const (
+const ( // [TODO]something constant here might move to configure file later.
 	SeqLength = 5
 
-	Delay = 0
+	Delay          = 0
+	FileCleanCycle = 5 * time.Second
 
 	Day          = 24 * time.Hour
 	Week         = 7 * Day
@@ -219,7 +225,8 @@ func (fm *FileManager) CreateFile(dirPath string, fi FileInfo) (*os.File, error)
 	return f, err
 }
 
-func (fm *FileManager) downloadFile(tId string) {
+// Getting file.
+func (fm *FileManager) downloadFile(tId string) { // [TODO:Naming]{getFile}
 	var err error
 	var ft *FileTask
 	b := make([]byte, SeqLength)
@@ -365,6 +372,7 @@ func (fm *FileManager) downloadFile(tId string) {
 	logger.Info("Download end.")
 }
 
+//
 func (fm *FileManager) StoreTask(ft *FileTask) {
 	fm.server.openDatabase("[Store Task]")
 	defer func() {
@@ -383,8 +391,9 @@ func (fm *FileManager) StoreTask(ft *FileTask) {
 	}
 }
 
-// Deadline of the file
-func (fm *FileManager) Deadline() {
+// Deadline of the file storing. This present as a file cleaner which user upload,
+// it checks table 'file_list' in database every cleaning-cycle-time that been set.
+func (fm *FileManager) Deadline() { // [TODO:Naming]{'FileCleaner'}
 	logger.Info("Deadline counting.")
 
 	for {
@@ -395,7 +404,7 @@ func (fm *FileManager) Deadline() {
 		)
 		fm.server.openDatabase("[Deadline]")
 		var line = time.Now().Unix() - int64(FileDeadline/time.Second)
-		logger.Tracef("Line : %v", line)
+		//logger.Tracef("Line : %v", line)
 
 		stmt, err := fm.server.db.Prepare("SELECT taskId, dirPath, sendTime FROM file_list WHERE sendTime<?")
 		if err != nil {
@@ -431,6 +440,6 @@ func (fm *FileManager) Deadline() {
 		}
 
 		fm.server.closeDatabase("[Deadline]")
-		time.Sleep(5 * time.Second)
+		time.Sleep(FileCleanCycle)
 	}
 }

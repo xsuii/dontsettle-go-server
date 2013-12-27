@@ -21,7 +21,7 @@ import (
 var platform = runtime.GOOS
 
 func loadLogComfig() {
-	logger, err := mainlog.LoggerFromConfigAsFile("conf/log/" + platform + "/color.xml") //{ should change according to platform }//
+	logger, err := mainlog.LoggerFromConfigAsFile("conf/log/" + platform + "/color.xml") // log configure change when platform change
 	if err != nil {
 		fmt.Println(err)
 		return

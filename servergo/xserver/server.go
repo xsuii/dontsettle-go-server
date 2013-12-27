@@ -1,3 +1,8 @@
+// Copyright 2013 xsuii. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+//
 package xserver
 
 import (
@@ -90,13 +95,15 @@ type Pack struct {
 }
 
 type ServerState struct {
-	Online int
+	Start       time.Time
+	Since       time.Duration
+	Onlines     int
+	Connections uint64
 }
 
 type Server struct {
 	clientPattern  string
 	managerPattern string
-	history        []Pack
 	connections    map[uint64]*connection // Registered connections
 	register       chan *connection
 	unregister     chan *connection
@@ -106,10 +113,10 @@ type Server struct {
 	doneCh         chan bool
 	db             *sql.DB
 	fileMan        *FileManager
+	serverState    *ServerState
 }
 
 func NewServer(cPattern string, mPattern string) *Server {
-	history := []Pack{}
 	connections := make(map[uint64]*connection)
 	register := make(chan *connection)
 	unregister := make(chan *connection)
@@ -121,7 +128,6 @@ func NewServer(cPattern string, mPattern string) *Server {
 	sv := &Server{
 		cPattern,
 		mPattern,
-		history,
 		connections,
 		register,
 		unregister,
@@ -131,11 +137,13 @@ func NewServer(cPattern string, mPattern string) *Server {
 		doneCh,
 		db,
 		&FileManager{},
+		&ServerState{},
 	}
 	sv.fileMan = NewFileManager(sv)
 	return sv
 }
 
+// Check login validity.
 func (s *Server) checkLogin(username string, userpasswd string) (uint64, error) {
 	var effect int
 	var uid uint64
@@ -176,6 +184,11 @@ func (s *Server) checkLogin(username string, userpasswd string) (uint64, error) 
 	}
 }
 
+// Open database
+// [TODO:Abandoning]	When offering this method to all object of the
+// 						server, should consider data compitition and some
+// 						other operation that might influence the validity
+// 						of data. So it might just 'do it by hand'
 func (s *Server) openDatabase(who string) {
 	logger.Trace(who, ":open database")
 	var err error
@@ -185,6 +198,7 @@ func (s *Server) openDatabase(who string) {
 	}
 }
 
+// Close database, which ... 'openDatabase'
 func (s *Server) closeDatabase(who string) {
 	logger.Trace(who, ":close database")
 	err := s.db.Close()
@@ -193,6 +207,7 @@ func (s *Server) closeDatabase(who string) {
 	}
 }
 
+// Recording offline message.
 func (s *Server) offlineMsgStore(p *Pack, offId []uint64) {
 	logger.Info("store offline message")
 	s.openDatabase("[OP:Offline messsage store]")
@@ -218,6 +233,7 @@ func (s *Server) offlineMsgStore(p *Pack, offId []uint64) {
 	logger.Tracef("Store total %v msg.", affect)
 }
 
+// Create a new package
 func (s *Server) NewPack(sender uint64, Reciever uint64, timestamp int64, opcode byte, body []byte) *Pack {
 	return &Pack{
 		Sender:    sender,
@@ -228,7 +244,7 @@ func (s *Server) NewPack(sender uint64, Reciever uint64, timestamp int64, opcode
 	}
 }
 
-// showing a pack
+// Showing a package in friendly way. The escape-code work just fine with linux.
 func (s *Server) showPack(who string, act string, p Pack) {
 	var prefix, suffix string
 	switch act { // color print
@@ -291,12 +307,14 @@ func (s *Server) masterPack(c *connection, body []byte) {
 
 func (s *Server) clientHandler() {
 	clientConnected := func(ws *websocket.Conn) {
+		s.serverState.Connections++
 		defer func() {
 			logger.Info("connection close!")
 			err := ws.Close()
 			if err != nil {
 				logger.Error(err.Error())
 			}
+			s.serverState.Connections--
 		}()
 
 		client := NewClient(ws, s)
@@ -330,11 +348,18 @@ func (s *Server) managerHandler() {
 	http.Handle(s.managerPattern, websocket.Handler(managerConnected))
 }
 
+// Get server's state, or profile.
 func (s *Server) getState() ServerState {
-	return ServerState{Online: len(s.connections)}
+	return ServerState{
+		Start:       s.serverState.Start,
+		Since:       time.Since(s.serverState.Start),
+		Onlines:     len(s.connections),
+		Connections: s.serverState.Connections,
+	}
 }
 
-func (s *Server) serverState() {
+// A server state profile web page.
+func (s *Server) serverStateHandle() {
 	state := func(w http.ResponseWriter, r *http.Request) {
 		t := template.New("Server state")
 		t, _ = t.Parse(
@@ -343,7 +368,10 @@ func (s *Server) serverState() {
 			</head>
 			<body>
 			<h1>Server State</h1>
-			Online: {{.Online}}
+			<h2>Onlines: {{.Onlines}}</h2>
+			<h2>Connections: {{.Connections}}</h2>
+			<h2>Start: {{.Start}}</h2>
+			<h2>Since: {{.Since}}</h2>
 			</body>`)
 		st := s.getState()
 		t.Execute(w, st)
@@ -360,19 +388,18 @@ func (s *Server) Listen() {
 	// create server handler
 	s.clientHandler()
 	s.managerHandler()
-	s.serverState()
-
+	s.serverStateHandle()
+	s.serverState.Start = time.Now()
 	for {
 		select {
 		case c := <-s.register:
 			s.connections[c.uid] = c
 			logger.Tracef("Client %v(uid) Register.", c.uid)
 			s.showConnections()
-			//c.DoneSync()
 		case c := <-s.unregister:
 			logger.Tracef("Delete Client %v(uid).", c.uid)
 			delete(s.connections, c.uid)
-			close(c.send)
+			//close(c.send)
 		case sin := <-s.toOne:
 			c := s.connections[sin.Reciever]
 			if c != nil {
@@ -412,6 +439,7 @@ func (s *Server) Listen() {
 	}
 }
 
+// Show current connections in some friendly way.
 func (s *Server) showConnections() {
 	var ids []uint64
 	for i, _ := range s.connections {
@@ -420,6 +448,7 @@ func (s *Server) showConnections() {
 	logger.Tracef("Current connections : %v", ids)
 }
 
+// Get users id which present dstination user.
 func (s *Server) GetUids(p *Pack) (error, []uint64) {
 	var (
 		uid   uint64
@@ -481,12 +510,6 @@ func (s *Server) Done() {
 
 func (s *Server) Err(err error) {
 	s.errCh <- err
-}
-
-func (s *Server) sendPastMessages(c *connection) {
-	for _, pack := range s.history {
-		c.Write(&pack)
-	}
 }
 
 func (s *Server) sendAll(pack *Pack) {
