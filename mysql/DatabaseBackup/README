@@ -1,0 +1,7 @@
+This database backup use 'mysqldump' tool.
+
+backup:
+	mysqldump -u<user> -p<passwd> -h<host> <database> > path
+
+recovery
+	mysqldump -u<user> -p<passwd> -h<host> <database> < path
